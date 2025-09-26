@@ -1,0 +1,37 @@
+# ---- 文本文件：统一换行为 LF（跨平台更省心） ----
+* text=auto
+*.sh   text eol=lf
+*.py   text eol=lf
+*.c    text eol=lf
+*.cc   text eol=lf
+*.cpp  text eol=lf
+*.h    text eol=lf
+*.hpp  text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.cmake text eol=lf
+*.bat  text eol=crlf
+
+# ---- 二进制：避免误当文本 diff ----
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.pdf  binary
+*.ico  binary
+
+# ---- Git LFS：大模型/权重/检查点等（如被提交则走 LFS）----
+*.pt    filter=lfs diff=lfs merge=lfs -text
+*.pth   filter=lfs diff=lfs merge=lfs -text
+*.ckpt  filter=lfs diff=lfs merge=lfs -text
+*.h5    filter=lfs diff=lfs merge=lfs -text
+*.npz   filter=lfs diff=lfs merge=lfs -text
+*.onnx  filter=lfs diff=lfs merge=lfs -text
+# 若你确实会提交压缩包/归档，也可放开下面几类（当前 .gitignore 已忽略就不必了）
+# *.zip   filter=lfs diff=lfs merge=lfs -text
+# *.tar   filter=lfs diff=lfs merge=lfs -text
+# *.tar.gz filter=lfs diff=lfs merge=lfs -text
+# *.tgz   filter=lfs diff=lfs merge=lfs -text

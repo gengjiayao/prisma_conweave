@@ -1,0 +1,52 @@
+# ns-3 / build
+conweave-ns3-main/build/
+**/build/
+**/*.o
+**/*.so
+**/*.a
+
+# 运行输出 / 日志 / traces
+**/mix/output/
+**/*.pcap
+**/*.tr
+**/*.log
+**/config.log
+**/*_out_*.txt
+
+# 模型与数据
+models/
+saved_models/
+**/*.pt
+**/*.pth
+**/*.ckpt
+**/*.h5
+**/*.npz
+**/*.npy
+**/*.tfrecord
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.env/
+
+# TensorBoard / 训练日志
+**/tb_logs/
+**/logs/
+**/events.out.tfevents.*
+
+# 打包文件
+*.zip
+*.tar
+*.tar.gz
+
+# 编辑器/工具本地配置与缓存
+.vscode/
+.idea/
+.history/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.cache/
+**/.ipynb_checkpoints/
+*.swp
+*.swo
