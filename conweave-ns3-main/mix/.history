@@ -1,0 +1,1031 @@
+date,id,ccmode,lbmode,cwh_tx_expiry_time,cwh_extra_reply_deadline,cwh_path_pause_time,cwh_extra_voq_flush_time,cwh_default_voq_waiting_time,pfc,irn,has_win,var_win,topo,bw,cdf,load,time
+06/13/25,562671048,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/562671048/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/562671048/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/562671048/config.txt'
+
+06/19/25,908019089,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/908019089/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/908019089/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/908019089/config.txt'
+
+06/26/25,525115264,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/525115264/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/525115264/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/525115264/config.txt'
+
+06/26/25,872952337,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/872952337/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/872952337/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/872952337/config.txt'
+
+06/27/25,902111899,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/902111899/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/902111899/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/902111899/config.txt'
+
+06/27/25,420470453,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/420470453/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/420470453/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/420470453/config.txt'
+
+07/02/25,280024725,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/280024725/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/280024725/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/280024725/config.txt'
+
+07/02/25,943523109,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/943523109/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/943523109/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/943523109/config.txt'
+
+07/02/25,98523425,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/98523425/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/98523425/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/98523425/config.txt'
+
+07/03/25,338550691,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/338550691/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/338550691/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/338550691/config.txt'
+
+07/03/25,817820121,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/817820121/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/817820121/config.log 2>&1
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/817820121/config.txt'
+
+07/03/25,836730756,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/836730756/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/836730756/config.log 2>&1 | tee
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/836730756/config.txt'
+
+07/03/25,235814551,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/235814551/config.txt' > /app/PRISMA_conweave/conweave-ns3-main/mix/output/235814551/config.log 2>&1 | tee /app/PRISMA_conweave/conweave-ns3-main/mix/output/235814551/config.log
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/235814551/config.txt'
+
+07/03/25,918627366,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/918627366/config.txt' 2>&1 | tee /app/PRISMA_conweave/conweave-ns3-main/mix/output/918627366/config.log
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/918627366/config.txt'
+
+07/03/25,718880459,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/718880459/config.txt' 2>&1 | tee /app/PRISMA_conweave/conweave-ns3-main/mix/output/718880459/config.log
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/718880459/config.txt'
+
+07/03/25,540710261,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/540710261/config.txt' 2>&1 | tee /app/PRISMA_conweave/conweave-ns3-main/mix/output/540710261/config.log
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/540710261/config.txt'
+
+07/03/25,958375106,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/958375106/config.txt' 2>&1 | tee /app/PRISMA_conweave/conweave-ns3-main/mix/output/958375106/config.log
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/958375106/config.txt'
+
+07/03/25,830059394,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/830059394/config.txt' 2>&1 | tee /app/PRISMA_conweave/conweave-ns3-main/mix/output/830059394/config.log
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/830059394/config.txt'
+
+07/03/25,797277355,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/797277355/config.txt' 2>&1 | tee /app/PRISMA_conweave/conweave-ns3-main/mix/output/797277355/config.log
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/797277355/config.txt'
+
+07/03/25,440180701,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/440180701/config.txt' 2>&1 | tee /app/PRISMA_conweave/conweave-ns3-main/mix/output/440180701/config.log
+./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/440180701/config.txt'
+
+07/03/25,731068506,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /app/PRISMA_conweave/conweave-ns3-main/mix/output/731068506/config.txt' 2>&1 | tee /app/PRISMA_conweave/conweave-ns3-main/mix/output/731068506/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/PRISMA_conweave/conweave-ns3-main/mix/output/731068506/config.txt'
+
+07/07/25,740687263,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /app/conweave-ns3-main/mix/output/740687263/config.txt' 2>&1 | tee /app/conweave-ns3-main/mix/output/740687263/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/conweave-ns3-main/mix/output/740687263/config.txt'
+
+07/11/25,195375692,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /app/conweave-ns3-main/mix/output/195375692/config.txt' 2>&1 | tee /app/conweave-ns3-main/mix/output/195375692/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/conweave-ns3-main/mix/output/195375692/config.txt'
+
+07/22/25,554350715,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /app/conweave-ns3-main/mix/output/554350715/config.txt' 2>&1 | tee /app/conweave-ns3-main/mix/output/554350715/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/conweave-ns3-main/mix/output/554350715/config.txt'
+
+07/22/25,935949772,1,0,1000,4,16,64,400,1,0,0,0,fat_k4_100G_OS2,100,AliStorage2019,40,0.1
+07/24/25,868324518,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /app/conweave-ns3-main/mix/output/868324518/config.txt' 2>&1 | tee /app/conweave-ns3-main/mix/output/868324518/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /app/conweave-ns3-main/mix/output/868324518/config.txt'
+
+07/24/25,302592958,1,0,1000,4,16,64,400,1,0,0,0,fat_k4_100G_OS2,100,AliStorage2019,40,0.1
+08/20/25,998516338,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/998516338/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/998516338/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/998516338/config.txt'
+
+08/20/25,643771554,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/643771554/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/643771554/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/643771554/config.txt'
+
+08/20/25,356095501,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/356095501/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/356095501/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/356095501/config.txt'
+
+08/20/25,337896066,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/337896066/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/337896066/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/337896066/config.txt'
+
+08/20/25,27891988,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/27891988/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/27891988/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/27891988/config.txt'
+
+08/20/25,77641743,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/77641743/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/77641743/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/77641743/config.txt'
+
+08/20/25,394455478,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/394455478/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/394455478/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/394455478/config.txt'
+
+08/20/25,185721772,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/185721772/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/185721772/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/185721772/config.txt'
+
+08/20/25,316411132,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316411132/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316411132/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316411132/config.txt'
+
+08/20/25,840896850,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/840896850/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/840896850/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/840896850/config.txt'
+
+08/20/25,828697471,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/828697471/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/828697471/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/828697471/config.txt'
+
+08/20/25,741314721,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/741314721/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/741314721/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/741314721/config.txt'
+
+08/21/25,183818832,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/183818832/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/183818832/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/183818832/config.txt'
+
+08/25/25,715609765,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/715609765/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/715609765/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/715609765/config.txt'
+
+08/26/25,702533839,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/702533839/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/702533839/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/702533839/config.txt'
+
+08/26/25,336917378,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/336917378/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/336917378/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/336917378/config.txt'
+
+08/26/25,794261334,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/794261334/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/794261334/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/794261334/config.txt'
+
+08/26/25,240819140,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/240819140/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/240819140/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/240819140/config.txt'
+
+08/26/25,389566417,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/389566417/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/389566417/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/389566417/config.txt'
+
+08/26/25,212847458,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/212847458/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/212847458/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/212847458/config.txt'
+
+08/26/25,657853643,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/657853643/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/657853643/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/657853643/config.txt'
+
+08/26/25,371268332,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/371268332/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/371268332/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/371268332/config.txt'
+
+08/26/25,128959314,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/128959314/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/128959314/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/128959314/config.txt'
+
+08/26/25,404144913,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/404144913/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/404144913/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/404144913/config.txt'
+
+08/28/25,565826901,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/565826901/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/565826901/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/565826901/config.txt'
+
+08/28/25,198149487,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/198149487/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/198149487/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/198149487/config.txt'
+
+08/28/25,247955327,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/247955327/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/247955327/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/247955327/config.txt'
+
+08/28/25,305570127,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/305570127/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/305570127/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/305570127/config.txt'
+
+08/28/25,793318981,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/793318981/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/793318981/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/793318981/config.txt'
+
+08/28/25,555320679,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/555320679/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/555320679/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/555320679/config.txt'
+
+08/28/25,280680059,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/280680059/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/280680059/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/280680059/config.txt'
+
+08/28/25,228817509,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/228817509/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/228817509/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/228817509/config.txt'
+
+08/28/25,847374094,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/847374094/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/847374094/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/847374094/config.txt'
+
+08/28/25,356544860,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/356544860/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/356544860/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/356544860/config.txt'
+
+08/28/25,362822751,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/362822751/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/362822751/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/362822751/config.txt'
+
+08/28/25,52395819,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/52395819/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/52395819/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/52395819/config.txt'
+
+08/28/25,741528085,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/741528085/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/741528085/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/741528085/config.txt'
+
+08/28/25,717020241,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/717020241/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/717020241/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/717020241/config.txt'
+
+08/28/25,530674974,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/530674974/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/530674974/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/530674974/config.txt'
+
+08/28/25,266220434,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/266220434/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/266220434/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/266220434/config.txt'
+
+08/28/25,67824297,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/67824297/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/67824297/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/67824297/config.txt'
+
+09/01/25,609762295,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/609762295/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/609762295/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/609762295/config.txt'
+
+09/01/25,113579521,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/113579521/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/113579521/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/113579521/config.txt'
+
+09/01/25,523616314,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/523616314/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/523616314/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/523616314/config.txt'
+
+09/01/25,526371392,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/526371392/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/526371392/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/526371392/config.txt'
+
+09/02/25,315736925,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/315736925/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/315736925/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/315736925/config.txt'
+
+09/02/25,654808369,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/654808369/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/654808369/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/654808369/config.txt'
+
+09/02/25,331683773,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/331683773/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/331683773/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/331683773/config.txt'
+
+09/02/25,61560367,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/61560367/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/61560367/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/61560367/config.txt'
+
+09/02/25,619464696,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/619464696/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/619464696/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/619464696/config.txt'
+
+09/02/25,623732279,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/623732279/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/623732279/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/623732279/config.txt'
+
+09/02/25,151813293,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/151813293/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/151813293/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/151813293/config.txt'
+
+09/02/25,377860280,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/377860280/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/377860280/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/377860280/config.txt'
+
+09/02/25,827928671,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/827928671/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/827928671/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/827928671/config.txt'
+
+09/02/25,674957899,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/674957899/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/674957899/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/674957899/config.txt'
+
+09/02/25,174816624,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/174816624/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/174816624/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/174816624/config.txt'
+
+09/02/25,160632695,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/160632695/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/160632695/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/160632695/config.txt'
+
+09/02/25,34513543,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/34513543/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/34513543/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/34513543/config.txt'
+
+09/03/25,338640317,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/338640317/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/338640317/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/338640317/config.txt'
+
+09/03/25,276509213,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/276509213/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/276509213/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/276509213/config.txt'
+
+09/03/25,644850588,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/644850588/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/644850588/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/644850588/config.txt'
+
+09/03/25,316539437,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316539437/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316539437/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316539437/config.txt'
+
+09/03/25,166887788,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/166887788/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/166887788/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/166887788/config.txt'
+
+09/03/25,868991234,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/868991234/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/868991234/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/868991234/config.txt'
+
+09/03/25,267363072,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/267363072/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/267363072/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/267363072/config.txt'
+
+09/03/25,714915570,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/714915570/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/714915570/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/714915570/config.txt'
+
+09/03/25,102114796,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/102114796/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/102114796/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/102114796/config.txt'
+
+09/03/25,347947723,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/347947723/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/347947723/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/347947723/config.txt'
+
+09/03/25,958038244,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/958038244/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/958038244/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/958038244/config.txt'
+
+09/03/25,47061521,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/47061521/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/47061521/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/47061521/config.txt'
+
+09/03/25,514256311,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/514256311/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/514256311/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/514256311/config.txt'
+
+09/03/25,157727188,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/157727188/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/157727188/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/157727188/config.txt'
+
+09/03/25,697956945,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/697956945/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/697956945/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/697956945/config.txt'
+
+09/03/25,398555786,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/398555786/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/398555786/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/398555786/config.txt'
+
+09/04/25,186704038,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/186704038/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/186704038/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/186704038/config.txt'
+
+09/04/25,664272318,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/664272318/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/664272318/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/664272318/config.txt'
+
+09/04/25,203957133,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/203957133/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/203957133/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/203957133/config.txt'
+
+09/05/25,51322327,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/51322327/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/51322327/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/51322327/config.txt'
+
+09/05/25,266240577,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/266240577/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/266240577/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/266240577/config.txt'
+
+09/08/25,441825596,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/441825596/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/441825596/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/441825596/config.txt'
+
+09/09/25,238744936,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/238744936/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/238744936/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/238744936/config.txt'
+
+09/09/25,877793305,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/877793305/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/877793305/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/877793305/config.txt'
+
+09/09/25,95456787,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/95456787/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/95456787/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/95456787/config.txt'
+
+09/09/25,571925966,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/571925966/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/571925966/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/571925966/config.txt'
+
+09/09/25,878403447,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/878403447/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/878403447/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/878403447/config.txt'
+
+09/09/25,66104294,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/66104294/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/66104294/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/66104294/config.txt'
+
+09/09/25,736746879,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/736746879/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/736746879/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/736746879/config.txt'
+
+09/09/25,210194039,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/210194039/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/210194039/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/210194039/config.txt'
+
+09/09/25,844458092,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/844458092/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/844458092/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/844458092/config.txt'
+
+09/09/25,446519234,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/446519234/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/446519234/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/446519234/config.txt'
+
+09/09/25,265030978,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/265030978/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/265030978/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/265030978/config.txt'
+
+09/10/25,835553213,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/835553213/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/835553213/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/835553213/config.txt'
+
+09/11/25,791987089,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/791987089/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/791987089/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/791987089/config.txt'
+
+09/11/25,651554503,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/651554503/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/651554503/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/651554503/config.txt'
+
+09/11/25,930146485,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/930146485/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/930146485/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/930146485/config.txt'
+
+09/11/25,340121797,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/340121797/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/340121797/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/340121797/config.txt'
+
+09/11/25,807102740,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/807102740/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/807102740/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/807102740/config.txt'
+
+09/11/25,231138772,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/231138772/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/231138772/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/231138772/config.txt'
+
+09/11/25,422093511,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/422093511/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/422093511/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/422093511/config.txt'
+
+09/11/25,76699759,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/76699759/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/76699759/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/76699759/config.txt'
+
+09/11/25,316602847,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316602847/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316602847/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316602847/config.txt'
+
+09/11/25,480279980,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/480279980/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/480279980/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/480279980/config.txt'
+
+09/11/25,6763884,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/6763884/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/6763884/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/6763884/config.txt'
+
+09/11/25,208367035,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/208367035/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/208367035/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/208367035/config.txt'
+
+09/11/25,704553977,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/704553977/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/704553977/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/704553977/config.txt'
+
+09/11/25,209946508,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/209946508/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/209946508/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/209946508/config.txt'
+
+09/11/25,574306845,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/574306845/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/574306845/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/574306845/config.txt'
+
+09/11/25,886156333,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/886156333/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/886156333/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/886156333/config.txt'
+
+09/11/25,800287901,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/800287901/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/800287901/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/800287901/config.txt'
+
+09/11/25,241219131,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/241219131/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/241219131/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/241219131/config.txt'
+
+09/11/25,668349120,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/668349120/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/668349120/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/668349120/config.txt'
+
+09/11/25,226431068,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/226431068/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/226431068/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/226431068/config.txt'
+
+09/11/25,273639587,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/273639587/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/273639587/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/273639587/config.txt'
+
+09/11/25,317714604,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/317714604/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/317714604/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/317714604/config.txt'
+
+09/12/25,236824594,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/236824594/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/236824594/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/236824594/config.txt'
+
+09/12/25,912831242,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/912831242/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/912831242/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/912831242/config.txt'
+
+09/12/25,187535771,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/187535771/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/187535771/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/187535771/config.txt'
+
+09/12/25,559498171,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/559498171/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/559498171/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/559498171/config.txt'
+
+09/12/25,356592799,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/356592799/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/356592799/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/356592799/config.txt'
+
+09/12/25,526271321,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/526271321/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/526271321/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/526271321/config.txt'
+
+09/12/25,465813965,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/465813965/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/465813965/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/465813965/config.txt'
+
+09/12/25,163179474,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/163179474/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/163179474/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/163179474/config.txt'
+
+09/12/25,264498632,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/264498632/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/264498632/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/264498632/config.txt'
+
+09/12/25,902749634,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/902749634/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/902749634/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/902749634/config.txt'
+
+09/12/25,920679516,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/920679516/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/920679516/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/920679516/config.txt'
+
+09/12/25,216410794,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/216410794/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/216410794/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/216410794/config.txt'
+
+09/14/25,378074444,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/378074444/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/378074444/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/378074444/config.txt'
+
+09/14/25,674788016,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/674788016/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/674788016/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/674788016/config.txt'
+
+09/14/25,226157741,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/226157741/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/226157741/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/226157741/config.txt'
+
+09/14/25,885929180,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/885929180/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/885929180/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/885929180/config.txt'
+
+09/14/25,507433640,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/507433640/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/507433640/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/507433640/config.txt'
+
+09/14/25,203295650,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/203295650/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/203295650/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/203295650/config.txt'
+
+09/14/25,43702872,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/43702872/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/43702872/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/43702872/config.txt'
+
+09/14/25,752315586,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/752315586/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/752315586/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/752315586/config.txt'
+
+09/14/25,251729334,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/251729334/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/251729334/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/251729334/config.txt'
+
+09/17/25,667161488,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/667161488/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/667161488/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/667161488/config.txt'
+
+09/17/25,523615913,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/523615913/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/523615913/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/523615913/config.txt'
+
+09/17/25,761808101,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/761808101/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/761808101/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/761808101/config.txt'
+
+09/17/25,853812888,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/853812888/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/853812888/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/853812888/config.txt'
+
+09/17/25,143788877,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/143788877/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/143788877/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/143788877/config.txt'
+
+09/17/25,304029698,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/304029698/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/304029698/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/304029698/config.txt'
+
+09/17/25,23436867,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/23436867/config.txt' 2>&1 | tee /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/23436867/config.log
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/23436867/config.txt'
+
+09/18/25,936042061,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/936042061/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/936042061/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/936042061/config.txt'
+
+09/18/25,950136740,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/950136740/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/950136740/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/950136740/config.txt'
+
+09/18/25,316980696,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316980696/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316980696/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/316980696/config.txt'
+
+09/18/25,682291776,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/682291776/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/682291776/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/682291776/config.txt'
+
+09/18/25,539756331,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/539756331/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/539756331/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/539756331/config.txt'
+
+09/18/25,810735854,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/810735854/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/810735854/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/810735854/config.txt'
+
+09/18/25,251229626,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/251229626/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/251229626/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/251229626/config.txt'
+
+09/18/25,801210555,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/801210555/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/801210555/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/801210555/config.txt'
+
+09/18/25,863909638,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/863909638/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/863909638/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/863909638/config.txt'
+
+09/18/25,433182332,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/433182332/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/433182332/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/433182332/config.txt'
+
+09/19/25,810628616,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/810628616/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/810628616/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/810628616/config.txt'
+
+09/19/25,532310497,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/532310497/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/532310497/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/532310497/config.txt'
+
+09/19/25,306706866,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/306706866/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/306706866/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/306706866/config.txt'
+
+09/19/25,329301667,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/329301667/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/329301667/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/329301667/config.txt'
+
+09/19/25,942786018,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/942786018/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/942786018/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/942786018/config.txt'
+
+09/22/25,502294458,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/502294458/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/502294458/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/502294458/config.txt'
+
+09/22/25,496492353,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/496492353/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/496492353/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/496492353/config.txt'
+
+09/22/25,731572357,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/731572357/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/731572357/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/731572357/config.txt'
+
+09/22/25,554618219,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/554618219/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/554618219/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/554618219/config.txt'
+
+09/22/25,12265933,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/12265933/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/12265933/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/12265933/config.txt'
+
+09/22/25,219158065,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/219158065/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/219158065/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/219158065/config.txt'
+
+09/22/25,405105943,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/405105943/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/405105943/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/405105943/config.txt'
+
+09/22/25,722054160,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/722054160/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/722054160/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/722054160/config.txt'
+
+09/22/25,370884337,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/370884337/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/370884337/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/370884337/config.txt'
+
+09/22/25,431686809,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/431686809/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/431686809/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/431686809/config.txt'
+
+09/22/25,576815776,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.1
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/576815776/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/576815776/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/576815776/config.txt'
+
+09/23/25,537112508,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.01
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/537112508/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/537112508/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/537112508/config.txt'
+
+09/23/25,192709694,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/192709694/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/192709694/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/192709694/config.txt'
+
+09/23/25,504520933,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/504520933/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/504520933/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/504520933/config.txt'
+
+09/23/25,609148120,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/609148120/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/609148120/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/609148120/config.txt'
+
+09/23/25,93226706,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/93226706/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/93226706/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/93226706/config.txt'
+
+09/23/25,67554266,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/67554266/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/67554266/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/67554266/config.txt'
+
+09/23/25,108880848,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/108880848/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/108880848/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/108880848/config.txt'
+
+09/23/25,169417327,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/169417327/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/169417327/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/169417327/config.txt'
+
+09/23/25,135994738,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/135994738/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/135994738/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/135994738/config.txt'
+
+09/23/25,714340430,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/714340430/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/714340430/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/714340430/config.txt'
+
+09/23/25,281583527,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/281583527/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/281583527/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/281583527/config.txt'
+
+09/23/25,204496136,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/204496136/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/204496136/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/204496136/config.txt'
+
+09/23/25,154509762,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/154509762/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/154509762/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/154509762/config.txt'
+
+09/23/25,458171929,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/458171929/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/458171929/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/458171929/config.txt'
+
+09/23/25,641223323,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/641223323/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/641223323/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/641223323/config.txt'
+
+09/23/25,812389534,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/812389534/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/812389534/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/812389534/config.txt'
+
+09/23/25,578699809,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/578699809/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/578699809/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/578699809/config.txt'
+
+09/23/25,139817178,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/139817178/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/139817178/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/139817178/config.txt'
+
+09/23/25,964924856,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/964924856/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/964924856/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/964924856/config.txt'
+
+09/23/25,216654543,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/216654543/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/216654543/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/216654543/config.txt'
+
+09/23/25,722565122,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/722565122/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/722565122/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/722565122/config.txt'
+
+09/23/25,81498125,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/81498125/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/81498125/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/81498125/config.txt'
+
+09/23/25,505509179,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/505509179/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/505509179/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/505509179/config.txt'
+
+09/23/25,676948373,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/676948373/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/676948373/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/676948373/config.txt'
+
+09/23/25,96747883,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/96747883/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/96747883/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/96747883/config.txt'
+
+09/24/25,9176609,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/9176609/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/9176609/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/9176609/config.txt'
+
+09/24/25,254475718,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/254475718/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/254475718/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/254475718/config.txt'
+
+09/24/25,992701131,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/992701131/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/992701131/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/992701131/config.txt'
+
+09/24/25,983107352,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/983107352/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/983107352/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/983107352/config.txt'
+
+09/24/25,212989563,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/212989563/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/212989563/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/212989563/config.txt'
+
+09/24/25,474527501,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/474527501/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/474527501/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/474527501/config.txt'
+
+09/24/25,765652100,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/765652100/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/765652100/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/765652100/config.txt'
+
+09/24/25,348744123,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/348744123/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/348744123/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/348744123/config.txt'
+
+09/24/25,783079759,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,40,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/783079759/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/783079759/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/783079759/config.txt'
+
+09/24/25,635804393,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,10,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/635804393/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/635804393/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/635804393/config.txt'
+
+09/24/25,447332166,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/447332166/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/447332166/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/447332166/config.txt'
+
+09/24/25,828466306,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/828466306/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/828466306/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/828466306/config.txt'
+
+09/24/25,281028747,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.005
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/281028747/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/281028747/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/281028747/config.txt'
+
+09/25/25,456237557,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/456237557/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/456237557/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/456237557/config.txt'
+
+09/25/25,908284773,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/908284773/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/908284773/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/908284773/config.txt'
+
+09/25/25,448687912,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/448687912/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/448687912/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/448687912/config.txt'
+
+09/25/25,267961615,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/267961615/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/267961615/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/267961615/config.txt'
+
+09/25/25,796456657,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/796456657/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/796456657/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/796456657/config.txt'
+
+09/25/25,582227607,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/582227607/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/582227607/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/582227607/config.txt'
+
+09/25/25,955058301,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.01
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/955058301/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/955058301/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/955058301/config.txt'
+
+09/25/25,453017716,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.02
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/453017716/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/453017716/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/453017716/config.txt'
+
+09/25/25,281498327,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/281498327/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/281498327/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/281498327/config.txt'
+
+09/25/25,657518946,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/657518946/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/657518946/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/657518946/config.txt'
+
+09/25/25,580786484,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/580786484/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/580786484/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/580786484/config.txt'
+
+09/25/25,449878342,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/449878342/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/449878342/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/449878342/config.txt'
+
+09/25/25,95168987,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/95168987/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/95168987/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/95168987/config.txt'
+
+09/25/25,492917791,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/492917791/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/492917791/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/492917791/config.txt'
+
+09/25/25,139873714,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/139873714/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/139873714/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/139873714/config.txt'
+
+09/25/25,362524626,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/362524626/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/362524626/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/362524626/config.txt'
+
+09/25/25,530992739,1,0,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/530992739/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/530992739/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/530992739/config.txt'
+
+09/25/25,364917029,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/364917029/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/364917029/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/364917029/config.txt'
+
+09/25/25,896826313,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/896826313/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/896826313/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/896826313/config.txt'
+
+09/25/25,871180840,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/871180840/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/871180840/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/871180840/config.txt'
+
+09/25/25,438901493,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/438901493/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/438901493/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/438901493/config.txt'
+
+09/25/25,965690365,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/965690365/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/965690365/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/965690365/config.txt'
+
+09/26/25,260123890,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/260123890/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/260123890/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/260123890/config.txt'
+
+09/26/25,375094532,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/375094532/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/375094532/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/375094532/config.txt'
+
+09/26/25,387964615,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/387964615/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/387964615/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/387964615/config.txt'
+
+09/26/25,33469284,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,100,AliStorage2019,6,0.001
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/33469284/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/33469284/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/33469284/config.txt'
+
