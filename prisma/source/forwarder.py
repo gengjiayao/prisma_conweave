@@ -29,7 +29,7 @@ class Forwarder(Agent):
         # initialize the parent class
         super().__init__(index, agent_type, train)
 
-        # define the communication port
+        # define the communication port 端口basePort+index
         self.port = Agent.basePort + index
         print("Index: ", self.index, "Port: ", self.port)
         self.transition_number = 0
@@ -43,10 +43,15 @@ class Forwarder(Agent):
         if Agent.G == None or Agent.numNodes == 0:
             raise("Please make sure you input the topology")
 
-        ### define the ns3 env
+        ### define the ns3 env 用ns3env建一个ZMQ环境
         self.env = ns3env.Ns3Env(port=int(self.port), stepTime=Agent.stepTime, startSim=Agent.startSim, simSeed=Agent.seed, simArgs=Agent.simArgs, debug=Agent.debug)
         obs = self.env.reset()
         Agent.envs[self.index] = self.env
+        self.obs_dim = int(self.env.observation_space.shape[0])
+
+        # 首拍默认无控制包，pkt_id 置为 -1，防止首拍未初始化访问
+        self.signaling = False
+        self.pkt_id = -1
         if init:
             ## define the agent
             if self.agent_type == "dqn_buffer":
@@ -72,13 +77,20 @@ class Forwarder(Agent):
                 model = DQN_routing_model
                 
             if "dqn" in self.agent_type:
+                # 计算每邻居特征维度 K（(obs_dim - 1) / num_actions）
+                try:
+                    K = int((self.env.observation_space.shape[0] - 1) // self.env.action_space.n)
+                except Exception:
+                    K = self.env.action_space.n  # 兜底（不应触发）
+                if not hasattr(Agent, 'K'):
+                    Agent.K = K
                 Agent.agents[self.index] = DQN_AGENT(
                     q_func=model,
                     observation_shape=self.env.observation_space.shape,
                     num_actions=self.env.action_space.n,
                     num_nodes=Agent.numNodes,
                     input_size_splits = [1,
-                                        self.env.action_space.n,
+                                        self.env.action_space.n * Agent.K,
                                         ],
                     lr=Agent.lr,
                     gamma=Agent.gamma,
@@ -121,6 +133,32 @@ class Forwarder(Agent):
         
             ## define the log file for exploration value
             self.tb_writer_dict = {"exploration":  tf.summary.create_file_writer(logdir=f'{Agent.logs_folder}/exploration/node_{self.index}')}
+
+            # 每个 agent 的 reward 写入器（两条横轴）
+            self.tb_writer_dict["reward_steps"] = tf.summary.create_file_writer(
+                f"{Agent.logs_folder}/reward/node_{self.index}/by_steps"
+            )
+            self.tb_writer_dict["reward_time"]  = tf.summary.create_file_writer(
+                f"{Agent.logs_folder}/reward/node_{self.index}/by_time"
+            )
+
+            # 本地 EWMA 状态
+            self.r_alpha = getattr(Agent, "reward_ewma_alpha", 0.05)
+            self.r_ewma  = 0.0
+        
+        # 初始化每节点的 pending 容器（用于本地闭环）
+        if not hasattr(Agent, "pending"):
+            Agent.pending = {}
+
+        # 默认的调试/写频参数（已存在则不覆盖）
+        if not hasattr(Agent, "reward_log_every"):
+            Agent.reward_log_every = 1000
+        if not hasattr(Agent, "reward_ewma_alpha"):
+            Agent.reward_ewma_alpha = 0.05
+        if not hasattr(Agent, "reward_debug_every"):
+            Agent.reward_debug_every = 5000
+        if not hasattr(Agent, "debug_reward"):
+            Agent.debug_reward = False
         ## env trackers definition
         self.count_arrived_packets = 0
         self.count_new_pkts = 0
@@ -163,36 +201,40 @@ class Forwarder(Agent):
                     Agent.temp_obs.pop(key, None)
 
             # 硬 TTL 兜底：定期剔除超时样本，并按“丢包样本”写入回放
-            try:
-                if Agent.total_nb_iterations % 300 == 0:  # 周期更紧：每 300 步做一次 TTL 清理
-                    now = Agent.curr_time
-                    # 与 C++ reward 窗口对齐：ttl = max(2*W, 5*RTT)
-                    W = 1e-3  # 与 m_rewardWinSec=1ms 对齐
-                    rtt_guess = getattr(Agent, "rtt_guess", 8.5e-6)
-                    ttl = max(2.0 * W, 5.0 * rtt_guess)
-                    stale_keys = [k for k, v in list(Agent.temp_obs.items()) if now - v.get("time", now) > ttl]
-                    for stale_id in stale_keys:
-                        rec = Agent.temp_obs.pop(stale_id, None)
-                        if rec is None:
-                            continue
-                        try:
-                            if Agent.agents[rec["node"]]:
-                                next_hop_degree = len(list(Agent.G.neighbors(self.neighbors[rec["action"]])))
-                                Agent.agents[rec["node"]].update_num_taken_actions(rec["action"], next_hop_degree)
-                        except:
-                            next_hop_degree = len(list(Agent.G.neighbors(self.index))) if Agent.G is not None else 1
-                        rew = self._get_reward_lost_pkt()
-                        obs_shape = next_hop_degree
-                        if Agent.loss_penalty_type == "fixed" and self.train:
-                            Agent.replay_buffer[self.index].add(np.array(rec["obs"], dtype=float).squeeze(),
-                                                                rec["action"],
-                                                                rew,
-                                                                np.array([rec["obs"][0]] + [0]*(obs_shape), dtype=float).squeeze(),
-                                                                True)
-                        Agent.node_lost_pkts += 1
-                        Agent.pkt_tracking_dict.pop(int(stale_id), None)
-            except Exception:
-                pass
+            # 为了避免误杀在途包，先关闭这个功能
+            # try:
+            #     if Agent.total_nb_iterations % 300 == 0:  # 周期更紧：每 300 步做一次 TTL 清理
+            #         now = Agent.curr_time
+            #         # 与 C++ reward 窗口对齐：ttl = max(2*W, 5*RTT)
+            #         W = 1e-3  # 与 m_rewardWinSec=1ms 对齐
+            #         rtt_guess = getattr(Agent, "rtt_guess", 8.5e-6)
+            #         ttl = max(2.0 * W, 5.0 * rtt_guess)
+            #         stale_keys = [k for k, v in list(Agent.temp_obs.items()) if now - v.get("time", now) > ttl]
+            #         for stale_id in stale_keys:
+            #             rec = Agent.temp_obs.pop(stale_id, None)
+            #             if rec is None:
+            #                 continue
+            #             try:
+            #                 if Agent.agents[rec["node"]]:
+            #                     next_hop_degree = len(list(Agent.G.neighbors(self.neighbors[rec["action"]])))
+            #                     Agent.agents[rec["node"]].update_num_taken_actions(rec["action"], next_hop_degree)
+            #             except:
+            #                 next_hop_degree = len(list(Agent.G.neighbors(self.index))) if Agent.G is not None else 1
+            #             rew = self._get_reward_lost_pkt()
+            #             obs_shape = next_hop_degree * getattr(Agent, 'K', 1)
+            #             if Agent.loss_penalty_type == "fixed" and self.train:
+            #                 Agent.replay_buffer[self.index].add(
+            #                     np.array(rec["obs"], dtype=float).squeeze(),
+            #                     rec["action"],
+            #                     rew,
+            #                     np.array([rec["obs"][0]] + [0]*(obs_shape), dtype=float).squeeze(),
+            #                     True
+            #                 )
+            #             Agent.node_lost_pkts += 1
+            #             Agent.pkt_tracking_dict.pop(int(stale_id), None)
+            # except Exception:
+            #     pass
+            # =========== TTL惩罚已关闭 ===========
             
             Agent.temp_obs[int(self.pkt_id)]= {"node": self.index,
                                                "obs": obs,
@@ -245,6 +287,9 @@ class Forwarder(Agent):
         Returns:
             bool: True if it is a control packet, False otherwise
         """
+        # 兼容空/非字符串的 info（如初始握手返回 {}）：直接视为控制信息，跳过处理
+        if not isinstance(info, str) or len(info) == 0:
+            return True
         tokens = info.split(",")
         self.delay_time = float(tokens[0].split('=')[-1])
         ## retrieve packet info
@@ -269,34 +314,49 @@ class Forwarder(Agent):
                 #if(int(lost_packet_time)!= int(lost_packet_info["time"]*1000)): 
                 #    continue 
                 try:
-                    # next_hop_degree = len(list(Agent.G.neighbors(self.neighbors[rec["action"]])))
                     if Agent.agents[rec["node"]]:
                         next_hop_degree = len(list(Agent.G.neighbors(self.neighbors[rec["action"]])))
                         Agent.agents[rec["node"]].update_num_taken_actions(rec["action"], next_hop_degree)
-                except:
-                    pass
+                except Exception:
+                    next_hop_degree = len(list(Agent.G.neighbors(self.index))) if Agent.G is not None else 1
                 rew = self._get_reward_lost_pkt()
-                obs_shape = next_hop_degree
+                #obs_shape = next_hop_degree * getattr(Agent, 'K', 1)
+                obs_dim = getattr(self, "obs_dim", int(self.env.observation_space.shape[0]))
+                next_obs = np.zeros(obs_dim, dtype=float)
+                try:
+                    next_obs[0] = float(rec["obs"][0])
+                except Exception:
+                    pass
+                buf_idx = int(rec.get("node", self.index))
                 ## Add the lost packet to the replay buffer
                 if Agent.loss_penalty_type == "fixed":
                     if(Agent.prioritizedReplayBuffer):
-                        Agent.replay_buffer[self.index].add(np.array(rec["obs"], dtype=float).squeeze(),
-                                    rec["action"], 
-                                    rew,
-                                    np.array([rec["obs"][0]] + [0]*(obs_shape), dtype=float).squeeze(), 
+                        # Agent.replay_buffer[self.index].add(np.array(rec["obs"], dtype=float).squeeze(),
+                        #             rec["action"], 
+                        #             rew,
+                        #             np.array([rec["obs"][0]] + [0]*(obs_shape), dtype=float).squeeze(),
+                        Agent.replay_buffer[buf_idx].add(np.array(rec["obs"], dtype=float).squeeze(),
+                                    int(rec["action"]),
+                                    float(rew),
+                                    next_obs.squeeze(), 
                                     True,
-                                    Agent.replay_buffer[self.index].latest_gradient_step[rec["action"]])
+                                    #Agent.replay_buffer[self.index].latest_gradient_step[rec["action"]])
+                                    Agent.replay_buffer[buf_idx].latest_gradient_step[int(rec["action"])])
                     else:
                         if(self.train):
-                            Agent.replay_buffer[self.index].add(np.array(rec["obs"], dtype=float).squeeze(),
-                                        rec["action"], 
-                                        rew,
-                                        np.array([rec["obs"][0]] + [0]*(obs_shape), dtype=float).squeeze(), 
+                            # Agent.replay_buffer[self.index].add(np.array(rec["obs"], dtype=float).squeeze(),
+                            #             rec["action"], 
+                            #             rew,
+                            #             np.array([rec["obs"][0]] + [0]*(obs_shape), dtype=float).squeeze(),
+                            Agent.replay_buffer[buf_idx].add(np.array(rec["obs"], dtype=float).squeeze(),
+                                        int(rec["action"]),
+                                        float(rew),
+                                        next_obs.squeeze(), 
                                         True)
                 ## Increment the loss counter
                 Agent.node_lost_pkts += 1
                 ## Remove the lost packet from the pkt tracking dict
-                Agent.pkt_tracking_dict.pop(int(lost_packet_id))
+                Agent.pkt_tracking_dict.pop(int(lost_packet_id), None)
         else: 
             if(pkt_type==2): # small signaling packet
                 id_signaled = int(tokens[18].split('=')[-1]) 
@@ -338,9 +398,18 @@ class Forwarder(Agent):
         Agent.sim_global_buffered_packets = float(tokens[16].split('=')[-1]) + Agent.sim_buffered_packets 
         Agent.sim_signaling_overhead = float(tokens[17].split('=')[-1])
         if Agent.sim_global_delivered_packets > 0:
-            Agent.sim_global_avg_e2e_delay = ((Agent.sim_global_avg_e2e_delay * float(tokens[13].split("=")[-1])) + (Agent.sim_avg_e2e_delay * Agent.sim_delivered_packets))/(Agent.sim_global_delivered_packets)
+            prev_delivered = float(tokens[13].split("=")[-1])
+            Agent.sim_global_avg_e2e_delay = (
+                (Agent.sim_global_avg_e2e_delay * prev_delivered) + (Agent.sim_avg_e2e_delay * Agent.sim_delivered_packets)
+            ) / (Agent.sim_global_delivered_packets)
         if Agent.sim_global_delivered_packets + Agent.sim_global_dropped_packets > 0:
-            Agent.sim_global_cost = ((Agent.sim_global_cost * (float(tokens[13].split("=")[-1]) + float(tokens[13].split("=")[-1]))) + (Agent.sim_cost * (Agent.sim_dropped_packets + Agent.sim_delivered_packets)))/(Agent.sim_global_dropped_packets + Agent.sim_global_delivered_packets)
+            prev_dropped = float(tokens[13].split("=")[-1])
+            prev_delivered = float(tokens[14].split("=")[-1])
+            prev_total = prev_dropped + prev_delivered
+            curr_total = Agent.sim_dropped_packets + Agent.sim_delivered_packets
+            Agent.sim_global_cost = (
+                (Agent.sim_global_cost * prev_total) + (Agent.sim_cost * curr_total)
+            ) / (Agent.sim_global_dropped_packets + Agent.sim_global_delivered_packets)
         return False
 
     def run(self):
@@ -354,19 +423,137 @@ class Forwarder(Agent):
             while True:
                 if(not self.env.connected):
                     break
-                obs, r_env, done_flag, info = self.step(obs)
+                prev_obs = obs
+                obs, r_env, done_flag, info = self.step(prev_obs)
+                is_ctrl = self.treat_info(info)
+                pkt_done = bool(done_flag)
+                will_reach_max = (
+                    Agent.max_nb_arrived_pkts > 0
+                    and (Agent.total_arrived_pkts + (1 if pkt_done else 0)) >= Agent.max_nb_arrived_pkts
+                )
+                episode_done = (not self.env.connected) or will_reach_max
                 # debug print suppressed; keep logs minimal to speed up
 
                 ## check if episode is done_flag
-                if done_flag and obs[0] == -1:
-                    break
+                # 提前 break 会丢最后一条 transition，统一在后续 done 分支处理
 
                 ## Increment the simulation and episode counters
                 self.transition_number += 1
                 Agent.total_nb_iterations += 1
 
-                ## Treat the info from the env
-                if self.treat_info(info):
+                # —— 记录 reward（steps/time），不依赖 pkt_type ——
+                if getattr(Agent, "reward_log_every", 0) > 0 and (Agent.total_nb_iterations % Agent.reward_log_every == 0):
+                    try:
+                        r_val = float(r_env)
+                        # 更新本地/全局 EWMA
+                        self.r_ewma = (1.0 - self.r_alpha) * self.r_ewma + self.r_alpha * r_val
+                        Agent.global_reward_ewma = (
+                            (1.0 - Agent.reward_ewma_alpha) * getattr(Agent, "global_reward_ewma", 0.0)
+                            + Agent.reward_ewma_alpha * r_val
+                        )
+                        step_idx = Agent.total_nb_iterations
+                        t_us = int((Agent.base_curr_time + Agent.curr_time) * 1e6)
+                        with self.tb_writer_dict["reward_steps"].as_default():
+                            tf.summary.scalar("reward_over_steps", r_val, step=step_idx)
+                            tf.summary.scalar("reward_ewma_over_steps", self.r_ewma, step=step_idx)
+                        with self.tb_writer_dict["reward_time"].as_default():
+                            tf.summary.scalar("reward_over_time", r_val, step=t_us)
+                            tf.summary.scalar("reward_ewma_over_time", self.r_ewma, step=t_us)
+                        if getattr(Agent, "reward_global_by_steps_writer", None) is not None:
+                            with Agent.reward_global_by_steps_writer.as_default():
+                                tf.summary.scalar("global_reward_ewma_over_steps", Agent.global_reward_ewma, step=step_idx)
+                        if getattr(Agent, "reward_global_by_time_writer", None) is not None:
+                            with Agent.reward_global_by_time_writer.as_default():
+                                tf.summary.scalar("global_reward_ewma_over_time", Agent.global_reward_ewma, step=t_us)
+                    except Exception:
+                        pass
+
+                # —— 调试打印：收到/写入的 reward 与 temp_obs 规模 ——
+                # —— 本地闭环：先用当前 (r_env, obs) 关闭上一拍 (s_{t-1}, a_{t-1}) ——
+                had_pending = (self.index in Agent.pending)
+                pend = Agent.pending.pop(self.index, None)
+                wrote_transition = (pend is not None)
+                if pend is not None:
+                    if Agent.signaling_type == "ideal":
+                        Agent.replay_buffer[self.index].add(
+                            pend["obs"],
+                            pend["action"],
+                            float(r_env),
+                            np.array(obs, dtype=float).squeeze(),
+                            #done_flag,
+                            episode_done,
+                        )
+                    elif Agent.signaling_type == "NN":
+                        self._push_upcoming_event(self.index, {
+                            "time": Agent.curr_time + self.small_signaling_delay,
+                            "obs": pend["obs"],
+                            "action": pend["action"],
+                            "reward": float(r_env),
+                            "new_obs": np.array(obs, dtype=float).squeeze(),
+                            #"flag": done_flag,
+                            "flag": episode_done,
+                            "pkt_id": getattr(self, "pkt_id", -1),
+                        })
+                        if Agent.signalingSim == 0 and self.train:
+                            Agent.small_signaling_overhead_counter += self.small_signaling_pkt_size
+                            Agent.small_signaling_pkt_counter += 1
+                    elif Agent.signaling_type == "target":
+                        # 若仍使用 target 模式，可在此按需计算 target；保持最小入侵暂不变
+                        pass
+
+                    try:
+                        Agent.agents[self.index].update_num_taken_actions(
+                            pend["action"], pend.get("next_hop_degree", 1)
+                        )
+                    except Exception:
+                        pass
+
+                # —— 调试打印：收到/写入的 reward 与 temp_obs 规模 ——
+                if getattr(Agent, "debug_reward", False) and (
+                    (Agent.total_nb_iterations % getattr(Agent, "reward_debug_every", 5000) == 0) or (float(r_env) != 0.0)
+                ):
+                    try:
+                        buffer_size = Agent.replay_buffer[self.index].__len__() if hasattr(Agent.replay_buffer[self.index], '__len__') else -1
+                        print(f"[DBG][node {self.index}] step={Agent.total_nb_iterations} r_env={float(r_env):.6f} had_pending={had_pending} wrote_transition={wrote_transition} temp_obs_size={len(Agent.temp_obs)} eps={self.update_eps:.4f} buf_size={buffer_size}")
+                    except Exception:
+                        pass
+
+                # —— 登记本拍 (s_t=prev_obs, a_t=self.action)，待下一拍 r_{t+1} 来闭环 ——
+                if (not is_ctrl) and not (getattr(self, "signaling", False) or prev_obs[0] == self.index or prev_obs[0] in (-1, 1000)):
+                    try:
+                        next_hop_degree = len(list(Agent.G.neighbors(self.neighbors[self.action]))) if Agent.G is not None else 1
+                    except Exception:
+                        next_hop_degree = len(list(Agent.G.neighbors(self.index))) if Agent.G is not None else 1
+                    Agent.pending[self.index] = {
+                        "obs": np.array(prev_obs, dtype=float).squeeze(),
+                        "action": int(self.action),
+                        "next_hop_degree": next_hop_degree,
+                    }
+
+                ## Treat the info from the env（控制包也完成了闭环与登记）
+                #if self.treat_info(info):
+                if Agent.signaling_type in ("NN", "target") and Agent.signalingSim == 0:
+                    self._get_upcoming_events()
+                if is_ctrl:
+                    if episode_done:
+                        # —— 兜底：episode 结束，把最后一个 pending 关掉（terminal）——
+                        final_pend = Agent.pending.pop(self.index, None)
+                        if final_pend is not None:
+                            try:
+                                Agent.replay_buffer[self.index].add(
+                                    final_pend["obs"],
+                                    final_pend["action"],
+                                    0.0,
+                                    np.array(obs, dtype=float).squeeze(),
+                                    True
+                                )
+                                if getattr(Agent, "debug_reward", False):
+                                    print(f"[DBG][node {self.index}] terminal-close pending: action={final_pend['action']} r=0.0")
+                            except Exception:
+                                pass
+                        if will_reach_max:
+                            print("Done by max number of arrived pkts")
+                        break
                     continue # if it is a control packet, continue
                 
                 Agent.nb_transitions += 1
@@ -374,15 +561,33 @@ class Forwarder(Agent):
                     self.handle_new_packet(obs)
                     
                 else: ## if the packet is not new in the network
-                    self.handle_transit_packet(obs, done_flag, r_env)
+                    self.handle_transit_packet(obs, pkt_done, r_env)
 
-                    if done_flag: ## if the packet arrived to destination
+                    if pkt_done: ## if the packet arrived to destination
                         self.handle_done()
-                        
+
+                    if episode_done:
+                        # —— 兜底：episode 结束，把最后一个 pending 关掉（terminal）——
+                        final_pend = Agent.pending.pop(self.index, None)
+                        if final_pend is not None:
+                            try:
+                                Agent.replay_buffer[self.index].add(
+                                    final_pend["obs"],
+                                    final_pend["action"],
+                                    0.0,
+                                    np.array(obs, dtype=float).squeeze(),
+                                    True
+                                )
+                                if getattr(Agent, "debug_reward", False):
+                                    print(f"[DBG][node {self.index}] terminal-close pending: action={final_pend['action']} r=0.0")
+                            except Exception:
+                                pass
+
                         ## check if the episode is done by max number of arrived pkts
-                        if Agent.max_nb_arrived_pkts > 0 and Agent.max_nb_arrived_pkts <= Agent.total_arrived_pkts:
+                        #if Agent.max_nb_arrived_pkts > 0 and Agent.max_nb_arrived_pkts <= Agent.total_arrived_pkts:
+                        if will_reach_max:
                             print("Done by max number of arrived pkts")
-                            break
+                        break
             break
         ## close the zmq bridge
         self.env.ns3ZmqBridge.send_close_command()
@@ -406,11 +611,11 @@ class Forwarder(Agent):
                                                     "start_time": Agent.curr_time,
                                                     "tag": None}
 
-    def handle_transit_packet(self, obs, done_flag, r_env):
+    def handle_transit_packet(self, obs, pkt_done, r_env):
         """ Handle a transit packet (not new). 
         Args:
             obs (list): observation from the environment
-            done_flag (bool): if the packet arrived to destination
+            pkt_done (bool): if the packet arrived to destination
         """
         states_info = Agent.temp_obs.pop(self.pkt_id, None)
         if states_info is None:
@@ -418,7 +623,14 @@ class Forwarder(Agent):
             return
 
         hop_time_real =  Agent.curr_time - states_info["time"]
-        hop_time_ideal = ((states_info["obs"][states_info["action"] + 1] + 512 ) * 8 / Agent.link_cap) + (Agent.link_delay*0.001)
+        # 使用扩展观测的 cost_bytes（邻居块的第一个特征）估计理想跳时延
+        try:
+            K = getattr(Agent, 'K', 1)
+            base = 1 + states_info["action"] * K
+            cost_bytes = states_info["obs"][base]
+        except Exception:
+            cost_bytes = states_info["obs"][states_info["action"] + 1]
+        hop_time_ideal = ((cost_bytes + 512 ) * 8 / Agent.link_cap) + (Agent.link_delay*0.001)
         Agent.total_rewards_with_loss += hop_time_real
         ## add to tracked pkts
         Agent.pkt_tracking_dict[int(self.pkt_id)]["hops"].append(self.index)                        
@@ -430,55 +642,22 @@ class Forwarder(Agent):
         Agent.rewards.append(hop_time_real)
         Agent.pkt_tracking_dict[int(self.pkt_id)]["delays_ideal"].append(hop_time_ideal)
         Agent.pkt_tracking_dict[int(self.pkt_id)]["delays_real"].append(hop_time_real)                  
-        if Agent.signaling_type == "ideal":
-            Agent.replay_buffer[int(states_info["node"])].add(np.array(states_info["obs"], dtype=float).squeeze(),
-                                                              states_info["action"],
-                                                              float(r_env),
-                                                              np.array(obs, dtype=float).squeeze(),
-                                                              done_flag)
-        elif Agent.signaling_type == "NN":
-            self._push_upcoming_event(int(states_info["node"]), { "time": Agent.curr_time + self.small_signaling_delay,
-                                                                    "obs" : np.array(states_info["obs"], dtype=float).squeeze(),
-                                                                    "action": states_info["action"], 
-                                                                    "reward": float(r_env),
-                                                                    "new_obs": np.array(obs, dtype=float).squeeze(), 
-                                                                    "flag": done_flag,
-                                                                    "pkt_id": self.pkt_id,
-                                                                    })
-            if Agent.signalingSim == 0 and self.train:
-                Agent.small_signaling_overhead_counter += self.small_signaling_pkt_size
-                Agent.small_signaling_pkt_counter += 1
+        # 样本入库改由本地 pending 闭环在 run() 中完成；此处不再跨节点写样本 这里的reward计算已经被废弃
+        # 保留上面统计/追踪信息更新，用于 hops/delays 统计和丢包逻辑
 
-        elif Agent.signaling_type == "target":
-            ## compute the target value
-            filtered_index = np.where(np.array(list(Agent.G.neighbors(self.index)))!=int(states_info["node"]))[0] # filter the net interface from where the pkt comes 
-            target = Agent.agents[self.index].get_target_value(np.array([float(r_env)]),
-                                                                np.array([obs]),
-                                                                np.array([done_flag]), 
-                                                                filtered_index)
-            # target = hop_time_ideal + Agent.gamma * (1- int(self.done_flag)) * tf.reduce_min(Agent.agents[self.index].q_network(np.array([self.obs], dtype=float)), 1)
-            
-            self._push_upcoming_event(int(states_info["node"]), {   "time": Agent.curr_time + self.small_signaling_delay,
-                                                                    "obs" : np.array(states_info["obs"], dtype=float).squeeze(),
-                                                                    "action": states_info["action"], 
-                                                                    "target": target.numpy().item(),
-                                                                    "new_obs": np.array(obs, dtype=float).squeeze(), 
-                                                                    "flag": done_flag,
-                                                                    "pkt_id": self.pkt_id,
-                                                                    })
-            if Agent.signalingSim == 0 and self.train:
-                Agent.small_signaling_overhead_counter += self.small_signaling_pkt_size
-                Agent.small_signaling_pkt_counter += 1
+        # 不在此处写 TensorBoard；统一在 run() 中写，避免重复/漏写
 
     def handle_done(self):
         """ Handle the case when a packet arrives at the destination
         """
         self.count_arrived_packets += 1
         Agent.total_arrived_pkts += 1
-        # Agent.total_e2e_delay += delay_time
+        # 直接用逐跳累计的真实延迟作为 e2e，避免依赖 C++ info 里的占位值
         hops =  len(Agent.pkt_tracking_dict[int(self.pkt_id)]["hops"]) - 1
         Agent.total_hops += hops
-        Agent.total_e2e_delay += self.delay_time
+        e2e_real = sum(Agent.pkt_tracking_dict[int(self.pkt_id)]["delays_real"])
+        self.delay_time = e2e_real
+        Agent.total_e2e_delay += e2e_real
         Agent.delays_ideal.append(sum(Agent.pkt_tracking_dict[int(self.pkt_id)]["delays_ideal"]))
         Agent.delays_real.append(sum(Agent.pkt_tracking_dict[int(self.pkt_id)]["delays_real"]))
         Agent.delays.append(self.delay_time)

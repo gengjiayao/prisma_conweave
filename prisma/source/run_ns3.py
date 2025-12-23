@@ -103,7 +103,11 @@ def run_ns3(params, configure=True):
         #f'--conweave_use_prisma {params["conweave_use_prisma"]} '
     )
     print("即将调用 run.py 传递参数中")
-    proc = subprocess.Popen(shlex.split(runpy_cmd))
+    proc = subprocess.Popen(
+        shlex.split(runpy_cmd),
+        cwd=params["ns3_sim_path"],
+        preexec_fn=os.setsid
+    )
     print(f"启动了conweave的run.py，pid为：{proc.pid}")
 
     os.chdir(current_folder_path)

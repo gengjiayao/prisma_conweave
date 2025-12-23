@@ -2,10 +2,11 @@ import os
 import sys
 import zmq
 import time
+import signal
 
 import numpy as np
 
-import gym
+import gym as gym
 from gym import spaces
 from gym.utils import seeding
 from enum import IntEnum
@@ -42,6 +43,7 @@ class Ns3ZmqBridge(object):
         context = zmq.Context()
         self.socket = context.socket(zmq.REP)
         self.socket.setsockopt(zmq.RCVTIMEO, -1)
+        self.socket.setsockopt(zmq.LINGER, 0)
         try:
             if port == 0 and self.startSim:
                 port = self.socket.bind_to_random_port('tcp://*', min_port=5001, max_port=10000, max_tries=100)
@@ -118,13 +120,13 @@ class Ns3ZmqBridge(object):
             mtype = boxSpacePb.dtype
 
             if mtype == pb.INT:
-                mtype = np.int
+                mtype = np.int64
             elif mtype == pb.UINT:
-                mtype = np.uint
+                mtype = np.uint64
             elif mtype == pb.DOUBLE:
-                mtype = np.float
+                mtype = np.float64
             else:
-                mtype = np.float
+                mtype = np.float32
 
             space = spaces.Box(low=low, high=high, shape=shape, dtype=mtype)
 

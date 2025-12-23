@@ -118,7 +118,7 @@ lb_modes = {
 }
 
 topo2bdp = {
-    "leaf_spine_128_100G_OS2": 104000,  # 2-tier -> all 100Gbps
+    "leaf_spine_128_100G_OS2": 5000,  # 2-tier -> all 1Gbps
     "fat_k8_100G_OS2": 156000,  # 3-tier -> all 100Gbps
 }
 
@@ -127,10 +127,11 @@ FLOWGEN_DEFAULT_TIME = 2.0  # see /traffic_gen/traffic_gen.py::base_t
 
 def main():
     # make directory if not exists
-    isExist = os.path.exists(os.getcwd() + "/mix/output/")
-    if not isExist:
-        os.makedirs(os.getcwd() + "/mix/output/")
-        print("The new directory is created - {}".format(os.getcwd() + "/mix/output/"))
+    #isExist = os.path.exists(os.getcwd() + "/mix/output/")
+    out_root = os.path.join(os.getcwd(), "mix", "output")
+    if not os.path.exists(out_root):
+        os.makedirs(out_root)
+        print("The new directory is created - {}".format(out_root))
 
     ################################################################
     #命令行参数解析
@@ -179,8 +180,20 @@ def main():
     parser.add_argument('--index_to_switch_id_map_file', dest='index_to_switch_id_map_file', default="", help="path to the file mapping RL agent index to switch ID")
     print(f"来自PRISMA的命令已经传递到了conweave！！！")
     
-    
+    #新流量生成文件参数
+    parser.add_argument('--traffic_mode', dest='traffic_mode', default='cdf',
+                        choices=['cdf', 'allreduce', 'alltoall'],
+                        help="traffic generate pattern:cdf or allreduce")
 
+    parser.add_argument('--ar_rounds', dest='ar_rounds', type=int, default=None, help="#rounds default=2*(n_host-1)")
+    parser.add_argument('--ar_step_us', dest='ar_step_us', type=float, default=340.0, help="inter-round interval in microseconds")
+    parser.add_argument('--ar_jitter_us', dest='ar_jitter_us', type=float, default=10.0, help="per-flow random jitter in microseconds")
+    parser.add_argument('--ar_chunk_bytes', dest='ar_chunk_bytes', type=int, default=4194304, help="per-round message size in bytes;if omitted,sample from CDF")
+    parser.add_argument('--ar_rotate_ring', dest='ar_rotate_ring', type=int, default=0, help="if 1 ,dst=(i+1+r)%N;if 0,dst=(i+1)%N")
+    
+    parser.add_argument('--aa_rounds', dest='aa_rounds', type=int, default=1)
+    parser.add_argument('--aa_chunk_bytes', dest='aa_chunk_bytes', type=int, default=4194304)
+    parser.add_argument('--aa_burst_us', dest='aa_burst_us', type=float, default=5000.0)
     # #### CONWEAVE PARAMETERS ####
     # parser.add_argument('--cwh_extra_reply_deadline', dest='cwh_extra_reply_deadline', action='store',
     #                     type=int, default=4, help="extra-timeout, where reply_deadline = base-RTT + extra-timeout (default: 4us)")
@@ -200,9 +213,11 @@ def main():
     # need to check directory exists or not
     isExist = True
     config_ID = 0
+    #out_root = os.path.join(os.getcwd(), "mix", "output")
     while (isExist):
         config_ID = str(random.randrange(MAX_RAND_RANGE))
-        isExist = os.path.exists(os.getcwd() + "/mix/output/" + config_ID)
+        run_dir = os.path.join(out_root, config_ID)
+        isExist = os.path.exists(run_dir)
 
     # input parameters
     cc_mode = cc_modes[args.cc]
@@ -214,9 +229,25 @@ def main():
     topo = args.topo
     enforce_win = args.enforce_win
     cdf = args.cdf
+    # sniff number of servers (needed by flow duration correction and file naming)
+    with open("config/{topo}.txt".format(topo=args.topo), 'r') as f_topo:
+        line = f_topo.readline().split(" ")
+        n_host = int(line[0]) - int(line[1])
+
     flowgen_start_time = FLOWGEN_DEFAULT_TIME  # default: 2.0
-    flowgen_stop_time = flowgen_start_time + \
-        float(args.simul_time)  # default: 2.0
+    flowgen_stop_time = flowgen_start_time + float(args.simul_time)
+    # if args.traffic_mode == 'allreduce':
+    #     ar_rounds = args.ar_rounds if args.ar_rounds is not None else 2 * (n_host - 1)
+    #     implied_duration_s = (ar_rounds * args.ar_step_us) / 1e6
+    #     min_stop = FLOWGEN_DEFAULT_TIME + implied_duration_s + 0.01
+    #     if flowgen_stop_time < min_stop:
+    #         flowgen_stop_time = min_stop
+    #         print("Auto-extend flowgen_stop_time to cover all rounds: stop=%.6fs" % flowgen_stop_time)
+    if args.traffic_mode == 'allreduce':
+        # 不根据轮数延长仿真时间
+        print(f"流量生成会在{args.simul_time}s结束")
+        # 保留ar_rounds参数，但不影响仿真时间
+        ar_rounds = args.ar_rounds if args.ar_rounds is not None else 2*(n_host - 1)
     sw_monitoring_interval = int(args.sw_monitoring_interval)
 
     # get over-subscription ratio from topoogy name
@@ -240,36 +271,83 @@ def main():
     # if float(args.simul_time) < 0.005:
     #     raise Exception("CONFIG ERROR : Runtime must be larger than 5ms (= warmup interval).")
 
-    # sniff number of servers
-    with open("config/{topo}.txt".format(topo=args.topo), 'r') as f_topo:
-        line = f_topo.readline().split(" ")
-        n_host = int(line[0]) - int(line[1])
-
     assert (hostload >= 0 and hostload < 100)
-    flow = "L_{load:.2f}_CDF_{cdf}_N_{n_host}_T_{time}ms_B_{bw}_flow".format(
-        load=hostload, cdf=args.cdf, n_host=n_host, time=int(float(args.simul_time)*1000), bw=bw)
-
+    if args.traffic_mode == 'cdf':
+        flow = "L_{load:.2f}_CDF_{cdf}_N_{n_host}_T_{time}ms_B_{bw}_flow".format(
+            load=hostload, cdf=args.cdf, n_host=n_host, time=int(float(args.simul_time) * 1000), bw=bw)
+    elif args.traffic_mode == 'allreduce':
+        ar_rounds = args.ar_rounds if args.ar_rounds is not None else 2 * (n_host - 1)
+        size_tag = ("CH{}".format(args.ar_chunk_bytes)
+                    if args.ar_chunk_bytes is not None
+                    else "CDF_{}".format(args.cdf))
+        flow = "AR_R{R}_STEP_{S}us_J{J}us_{size}_N_{N}_B_{bw}".format(
+            R=ar_rounds,
+            S=int(args.ar_step_us),
+            J=int(args.ar_jitter_us),
+            size=size_tag,
+            N=n_host,
+            bw=bw,
+        )
+    elif args.traffic_mode == 'alltoall':
+        aa_rounds = args.aa_rounds
+        size_tag = "CH{}".format(args.aa_chunk_bytes)
+        flow = "AA_R{R}_BURST_{B}us_{size}_N_{N}_B_{bw}".format(
+              R=aa_rounds,
+              B=int(args.aa_burst_us),
+              size=size_tag,
+              N=n_host,
+              bw=bw,
+        )
+    else:
+        raise Exception("Unknown traffic_mode: {}".format)
     # check the file exists
-    if (exists(os.getcwd() + "/config/" + flow + ".txt")):
-        print("Input traffic file with load:{load:.2f}, cdf:{cdf}, n_host:{n_host} already exists".format(
-            load=hostload, cdf=cdf, n_host=n_host))
-    else:  # make the input traffic file
-        print("Generate a input traffic file...")
-        print("python ./traffic_gen/traffic_gen.py -c {cdf} -n {n_host} -l {load} -b {bw} -t {time} -o {output}".format(
-            cdf=os.getcwd() + "/../traffic_gen/" + args.cdf + ".txt",
-            n_host=n_host,
-            load=hostload / 100.0,
-            bw=args.bw + "G",
-            time=args.simul_time,
-            output=os.getcwd() + "/config/" + flow + ".txt"))
+    out_path = os.getcwd() + "/config/" + flow + ".txt"
+    if exists(out_path):
+        print("Input traffic file already exists:", out_path)
+    else:
+        print("Generate a input traffic file... ->", out_path)
+        if args.traffic_mode == 'cdf':
+            cmd = ("python ./traffic_gen/traffic_gen.py "
+                   "-c {cdf} -n {n_host} -l {load} -b {bw} -t {time} -o {output}").format(
+                cdf=os.getcwd() + "/traffic_gen/" + args.cdf + ".txt",
+                n_host=n_host, load=hostload / 100.0,
+                bw=args.bw + "G", time=args.simul_time, output=out_path)
+        elif args.traffic_mode == 'allreduce':
+            chunk_arg = ("--chunk_bytes {cb}".format(cb=args.ar_chunk_bytes)) if args.ar_chunk_bytes else ""
+            cdf_arg = ("-c " + os.getcwd() + "/traffic_gen/" + args.cdf + ".txt") if not args.ar_chunk_bytes else ""
+            rotate_arg = "--rotate_ring {v}".format(v=int(args.ar_rotate_ring))
 
-        os.system("python ./traffic_gen/traffic_gen.py -c {cdf} -n {n_host} -l {load} -b {bw} -t {time} -o {output}".format(
-            cdf=os.getcwd() + "/traffic_gen/" + args.cdf + ".txt",
-            n_host=n_host,
-            load=hostload / 100.0,
-            bw=args.bw + "G",
-            time=args.simul_time,
-            output=os.getcwd() + "/config/" + flow + ".txt"))
+            # [修改] 显式传递 -t (时间) 和 -b (带宽)，并处理 rounds 可能为 None 的情况
+            rounds_val = args.ar_rounds if args.ar_rounds is not None else 1000000 # 传个大数让生成器自己按时间切
+
+            cmd = ("python ./traffic_gen/All_Reduce_traffic_gen.py "
+                   "-n {n_host} -b {bw} -t {time} "
+                   "{cdf_arg} --rounds {R} --step_us {S} --jitter_us {J} {chunk_arg} {rotate_arg} "
+                   "-o {output}").format(
+                n_host=n_host, bw=args.bw+"G", time=args.simul_time, 
+                cdf_arg=cdf_arg,
+                R=rounds_val,
+                S=args.ar_step_us, J=args.ar_jitter_us, chunk_arg=chunk_arg,
+                rotate_arg=rotate_arg, output=out_path)
+        elif args.traffic_mode == 'alltoall':
+            cmd = (
+                "python ./traffic_gen/AllToAll_traffic_gen.py "
+                "-n {n_host} -b {bw} -t {time} -o {output} "
+                "--rounds {R} --chunk_bytes {CH} --burst_us {BU}"
+            ).format(
+                n_host=n_host,
+                bw=args.bw + "G",
+                time=args.simul_time,
+                output=out_path,
+                R=args.aa_rounds,
+                CH=args.aa_chunk_bytes,
+                BU=args.aa_burst_us,
+            )
+        else:
+            raise Exception("Unknown traffic_mode: {}".format(args.traffic_mode))
+        
+        print(cmd)
+        os.system(cmd)
 
     # sanity check - bandwidth
     with open("config/{topo}.txt".format(topo=args.topo), 'r') as f_topo:
@@ -319,14 +397,22 @@ def main():
     ##################################################################
 
     # make directory if not exists
-    isExist = os.path.exists(os.getcwd() + "/mix/output/" + config_ID + "/")
-    assert (not isExist)
-    # if not isExist:
-    os.makedirs(os.getcwd() + "/mix/output/" + config_ID + "/")
-    print("The new directory is created  - {}".format(os.getcwd() +
-          "/mix/output/" + config_ID + "/"))
+    # isExist = os.path.exists(os.getcwd() + "/mix/output/" + config_ID + "/")
+    # assert (not isExist)
+    # # if not isExist:
+    # os.makedirs(os.getcwd() + "/mix/output/" + config_ID + "/")
+    # print("The new directory is created  - {}".format(os.getcwd() +
+    #       "/mix/output/" + config_ID + "/"))
 
-    config_name = os.getcwd() + "/mix/output/" + config_ID + "/config.txt"
+    # config_name = os.getcwd() + "/mix/output/" + config_ID + "/config.txt"
+    # print("Config filename:{}".format(config_name))
+    os.makedirs(run_dir)
+    print("The new directory is created  - {}".format(run_dir))
+
+    os.environ["MIX_OUTPUT_DIR"] = run_dir
+    print("MIX_OUTPUT_DIR set to:", os.environ["MIX_OUTPUT_DIR"])
+
+    config_name = os.path.join(run_dir, "config.txt")
     print("Config filename:{}".format(config_name))
 
     # By default, DCQCN uses no window (rate-based).
@@ -435,7 +521,7 @@ def main():
     ####################################################
     # NOTE: collect data except warm-up and cold-finish period
     fct_analysis_time_limit_begin = int(
-        flowgen_start_time * 1e9) + int(0.005 * 1e9)  # warmup
+        flowgen_start_time * 1e9) # + int(0.005 * 1e9)  # warmup
     fct_analysistime_limit_end = int(
         flowgen_stop_time * 1e9) + int(0.05 * 1e9)  # extra term
 

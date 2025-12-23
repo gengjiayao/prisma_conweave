@@ -12,8 +12,12 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <array>
+#include <string>
+#include <fstream>
 #include "ns3/callback.h"  // 新增：Callback
 namespace ns3 {
+struct CustomHeader;
 
 class ConweaveObsManager : public Object
 {
@@ -26,7 +30,10 @@ public:
   }
 
   ConweaveObsManager () {}
-  virtual ~ConweaveObsManager () {}
+  virtual ~ConweaveObsManager ();
+
+  // 每个出口的观测特征维度（cost_bytes, ce_local, ce_remote_min, age, cov）
+  static constexpr uint32_t kFeatsPerEgress = 5;
 
   // 9.22 一次性初始化overlay邻居序号,overlay->ns3节点id映射,ns3节点id->overlay序号映射
   void Configure(Ptr<SwitchNode> sw,
@@ -81,7 +88,9 @@ public:
   // 取出并清空丢包 UID 列表，拼成 "12;45;"；无则返回空串
   std::string DrainLostPacketsSemicolon();
   // 可选：在任何 drop 回调处调用
-  void ReportPacketDrop(uint64_t uid) { m_lostUids.push_back(uid); }
+  void ReportPacketDrop(uint64_t uid) { m_lostUids.push_back(uid); m_stepDropped += 1; m_globalDropped += 1; }
+  // 便于步进观测的丢包计数
+  void ReportPacketDropStep(uint64_t uid) { m_lostUids.push_back(uid); m_stepDropped += 1; }
 
   // 全局累计（给 GetExtraInfo 用）
   uint64_t GetGlobalInjected() const { return m_globalInjected; }
@@ -90,7 +99,7 @@ public:
   uint64_t GetGlobalBuffered() const { return m_globalBuffered; }
   // 由 SwitchNode 调用：每跳来了包，准备 obs 并发给 Python
   void OnPerHopPacket(Ptr<SwitchNode> sw, Ptr<NetDevice> inDev,
-                      Ptr<Packet> p, const CustomHeader& ch);
+                      Ptr<Packet> p, CustomHeader& ch);
 
   // 让 Env 能在收包回调里调用（公开接口，供 ConweaveRoutingEnv 使用）
   void ReportAckOnIngress(Ptr<const Packet> p);
@@ -138,9 +147,15 @@ private:
   uint64_t m_globalDropped  = 0;
   uint64_t m_globalBuffered = 0;
 
-  // 如需 e2e 延迟可在后续扩展（这里先不启用）
-  // std::unordered_map<uint64_t,double> m_firstSeenSec;
-  // std::unordered_map<uint64_t,bool>   m_seen;
+  // 启用首见时间与已见标记，用于 e2e 统计
+  std::unordered_map<uint64_t,double> m_firstSeenSec; // pktUid -> first seen time (sec)
+  std::unordered_map<uint64_t,bool>   m_seen;         // pktUid -> seen flag
+  double m_sumE2E = 0.0;                              // sum of delivered e2e delays (sec)
+  double m_lastDeliveredDelaySec = 0.0;               // last delivered packet e2e (sec)
+  // 每步（本步上报周期）局部统计，用于 info 中的 dropped/delivered/buffered
+  uint64_t m_stepDelivered = 0;
+  uint64_t m_stepDropped   = 0;
+  uint64_t m_stepBuffered  = 0;
   // === 单并发挂起上下文 ===
   bool             m_busy        = false;
   Ptr<SwitchNode>  m_swHeld;
@@ -177,6 +192,7 @@ private:
     uint32_t lastAckSeq = 0; // best-effort seq tracking for dup detection
     
     // Fixed window aggregation (ACC style)
+    // 现在的窗口机制已经移除
     double winStartSec = 0.0;
     double lastQueueSampleSec = 0.0;
     uint64_t ackBytesWin = 0;
@@ -186,6 +202,9 @@ private:
     std::array<double,10> qSteps{};
     // Smoothed queue score (for low-pass filtering of qScore)
     double qSmooth = 1.0;
+
+    // B1) QCN/NACK窗内计数
+    uint64_t ackWinCtrl = 0, nackWinCtrl = 0;
   };
 
   struct AckWin {
@@ -208,6 +227,10 @@ private:
     uint64_t lastAckNo = 0;
     double   emaDup = 0.0;   // EMA of dup ratio for the flow
     double   lastTs = 0.0;
+
+    //新增 per-flow throughput estimation
+    double emaBps = 0.0;
+    double lastAckTs = 0.0;
   };
   std::unordered_map<uint64_t, FlowStats> m_flowStats; // key: flowKey
   struct FlowMapping {
@@ -220,25 +243,31 @@ private:
   std::unordered_map<uint32_t, EgressPortStats> m_portStats; // key: outIf
   // TTL for flow->outIf mappings (seconds); mappings older than this are discarded
   double m_flowMapTtlSec = 0.05;  // 50ms, for flow->outIf mapping
-  double m_rewardWUtil = 0.5;
-  double m_rewardWQueue = 0.4;
-  double m_rewardWDup = 0.1;
-  // W_dup will be 1.0 - w_util - w_queue
-  // 调稳：reward 统计窗口 1ms（原 80us）
-  double m_rewardWinSec = 0.0005; // 0.5ms，加快窗口闭合
+  // 调参：加大队列权重，降低利用率权重，保持乱序权重
+  double m_rewardWUtil = 0.2;
+  double m_rewardWQueue = 0.6;
+  double m_rewardWDup = 0.2;
+  // C) 调参：启用一个小的均衡权重
+  double m_rewardWBalance = 0.05; // 默认启用轻度均衡
+  // B1) 新增：QCN/NACK惩罚项权重，由于和窗口强相关，先关闭，等稳定后可以再打开
+  double m_rewardWQcn = 0.0;
+  
+  // C) 调参：缩短窗口，加快反馈
+  double m_rewardWinSec = 40e-6; // 约5个RTT
   double m_rttGuessSec = 8.32e-6; // 8.32us, for BDP estimation
   double m_rewardMinSpanSec = 0; //不再使用
-  // Minimal ACK bytes to close window early (byte-trigger). 128KB default
-  // 调稳：字节触发阈值 256KB（原 64KB），降低高频结算
-  uint64_t m_rewardByteMin = 256 * 1024; // 256KB
+  // C) 调参：字节触发阈值与BDP对齐
+  uint64_t m_rewardByteMin = 8 * 1024; // 8KB (approx 1 BDP)
   // Low-pass factor for queue score smoothing
   // 调稳：队列平滑系数减小（慢一点）
-  double m_qSmoothLambda = 0.02;
+  double m_qSmoothLambda = 0.1;
   double m_rewardAlpha = 0.7; // r = 0.3*r_inst + 0.7*r_prev
 
   double m_winStartSec = 0.0;
   double m_lastRewardTimeSec = 0.0;
   uint32_t m_lastActionOutIf = 0;
+  // 切换：true=返回各端口增量之和（delta），false=返回水平值r（默认）
+  bool m_useDeltaReward = false;
 
   // registration / callbacks
   void RegisterEgressTracing(Ptr<SwitchNode> sw);
@@ -250,9 +279,46 @@ private:
   double ComputeReward();
 
 private:
+  // H1: RL决策覆盖率探针 (Ad-hoc)
+  std::unordered_map<uint64_t, uint32_t> m_decisionByUid;
+  uint64_t m_decChosen{0}, m_decMatch{0}, m_decMismatch{0};
+
+  // H3: 长环路采样探针
+  std::unordered_map<uint64_t, std::pair<uint32_t,int>> m_seenSwByUid;
+  uint64_t m_longLoopSample{0}, m_longLoopHit{0};
+
   // 在 private 里加：
   std::unordered_map<uint32_t, double> m_prevRByIf;      // 上一次窗口平滑reward（按端口）
   std::unordered_map<uint32_t, double> m_pendingDeltaByIf; // 尚未分发给“下一步”的增量（按端口）
+  // H1: RL决策覆盖率探针
+  uint64_t m_seenPkts = 0;
+  uint64_t m_gatedPkts = 0;
+  uint64_t m_bypassPkts = 0;
+
+  // H4: “打回头路”探针
+  uint32_t m_lastInIf = 0; // 记录包的入端口
+  uint64_t m_backHop = 0;
+  uint64_t m_fwdHop = 0;
+
+  // === Flowlet-level decision support ===
+  struct FlowletCtx {
+    double   lastSeenSec = 0.0;
+    double   startSec    = 0.0;
+    uint32_t lastActionOutIf = 0;
+    bool     awaitingAction  = false;
+    double   lockedUntilSec  = 0.0;
+    uint64_t bytesInFlowlet  = 0;
+    uint32_t pktsInFlowlet   = 0;
+  };
+  std::unordered_map<uint64_t, FlowletCtx> m_flowlets; // flowKey -> ctx
+  double m_flowletGapSec = 20e-6;    // flowlet的gap阈值，RTT的一半较为合适，config中看maxRTT
+  double m_minDwellSec   = 0.0;      // disable dwell to allow per-flowlet decisions
+  uint64_t m_flowletKeyHeld = 0;     // flowKey for the currently suspended first packet
+
+  // ==== Reward CSV logging ====
+  std::ofstream m_rewardCsv;
+  bool m_rewardCsvOpened = false;
+  void EnsureRewardCsvOpen();
 };
 
 } // namespace ns3

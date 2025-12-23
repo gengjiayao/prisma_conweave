@@ -54,33 +54,51 @@ class Trainer(Agent):
             obses_t = tf.constant(obses_t)
             actions_t = tf.constant(actions_t)
         else:
-            ### Construct the target values
-            targets_t = []
-            action_indices_all = []
-            for indx, neighbor in enumerate(self.neighbors):
-                filtered_indices = np.where(np.array(list(Agent.G.neighbors(neighbor)))!=self.index)[0] # filter the net interface from where the pkt comes
-                # filtered_indices = np.where(np.array(list(Agent.G.neighbors(neighbor)))!=1000)[0] # filter the net interface from where the pkt comes
-                action_indices = np.where(actions_t == indx)[0]
-                action_indices_all.append(action_indices)
-                if len(action_indices):
-                    if Agent.signaling_type in ("NN", "ideal"):
-                        targets_t.append(Agent.agents[self.index].get_neighbor_target_value(indx, 
-                                                                                            rewards_t[action_indices], 
-                                                                                            tf.constant(np.array(np.vstack(next_obses_t[action_indices]),
-                                                                                                                dtype=float)), 
-                                                                                            dones_t[action_indices],
-                                                                                            filtered_indices))
-            action_indices_all = np.concatenate(action_indices_all)
-            ### prepare tf variables
-            try:
-                obses_t = tf.constant(obses_t[action_indices_all,])
-            except:
-                print("ERROR")
-                print("Node: ", self.index)
-                print(obses_t[0], obses_t.shape, type(obses_t[0]))
-                raise(1)
-            actions_t = tf.constant(actions_t[action_indices_all], shape=(Agent.batch_size))
-            targets_t = tf.constant(tf.concat(targets_t, axis=0), shape=(Agent.batch_size))
+            # ### Construct the target values
+            # targets_t = []
+            # action_indices_all = []
+            # for indx, neighbor in enumerate(self.neighbors): #这里修改前，仅对leaf建立Agent，但是neighbor会包含spine
+            #     filtered_indices = np.where(np.array(list(Agent.G.neighbors(neighbor)))!=self.index)[0] # filter the net interface from where the pkt comes
+            #     # filtered_indices = np.where(np.array(list(Agent.G.neighbors(neighbor)))!=1000)[0] # filter the net interface from where the pkt comes
+            #     action_indices = np.where(actions_t == indx)[0]
+            #     action_indices_all.append(action_indices)
+            #     if len(action_indices):
+            #         if neighbor not in Agent.agents or Agent.agents[neighbor] is None: #消除spine的干扰
+            #             targets_t.append(tf.convert_to_tensor(rewards_t[action_indices], dtype = tf.float32))
+            #             continue
+            #         if Agent.signaling_type in ("NN", "ideal"):
+            #             targets_t.append(Agent.agents[self.index].get_neighbor_target_value(indx, 
+            #                                                                                 rewards_t[action_indices], 
+            #                                                                                 tf.constant(np.array(np.vstack(next_obses_t[action_indices]),
+            #                                                                                                     dtype=float)), 
+            #                                                                                 dones_t[action_indices],
+            #                                                                                 filtered_indices))
+            # action_indices_all = np.concatenate(action_indices_all)
+            # ### prepare tf variables
+            # try:
+            #     obses_t = tf.constant(obses_t[action_indices_all,])
+            # except:
+            #     print("ERROR")
+            #     print("Node: ", self.index)
+            #     print(obses_t[0], obses_t.shape, type(obses_t[0]))
+            #     raise(1)
+            # actions_t = tf.constant(actions_t[action_indices_all], shape=(Agent.batch_size))
+            # targets_t = tf.constant(tf.concat(targets_t, axis=0), shape=(Agent.batch_size))
+            ### Construct the target values (local bootstrap with this leaf's target Q)
+            obses_t = tf.constant(obses_t)
+            actions_t = tf.constant(actions_t, shape=(Agent.batch_size))
+            next_obses = tf.constant(np.array(np.vstack(next_obses_t), dtype=float))
+            if Agent.signaling_type in ("NN", "ideal"):
+                filtered_indices = np.arange(Agent.agents[self.index].num_actions)
+                targets_t = Agent.agents[self.index].get_target_value(
+                    tf.constant(rewards_t, dtype=float),
+                    next_obses,
+                    tf.constant(dones_t),
+                    filtered_indices,
+                )
+            else:
+                targets_t = tf.constant(rewards_t, dtype=float)
+            targets_t = tf.constant(targets_t, shape=(Agent.batch_size))
         
         weights = tf.constant(weights, dtype=float)
 
@@ -104,6 +122,8 @@ class Trainer(Agent):
         """
         ### Sync target NN
         if Agent.curr_time > ((Agent.sync_counters[self.index]+1)*Agent.sync_step):
+                if "dqn" in self.agent_type and Agent.signaling_type != "target":
+                    Agent.agents[self.index].update_target()
                 self._sync_all(update_upcoming=True)
                 Agent.sync_counters[self.index] += 1
                 # print("sync all at %s" % Agent.curr_time, "for node:", self.index, "sync counter:", self.sync_counter)

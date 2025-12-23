@@ -34,6 +34,13 @@
 NS_LOG_COMPONENT_DEFINE("CongaRouting");
 
 namespace ns3 {
+double CongaRouting::w_conga = 0.6;
+double CongaRouting::w_local = 0.2;
+double CongaRouting::w_age   = 0.1;
+double CongaRouting::w_cov   = 0.1;
+
+static inline double clamp01(double x){ return std::max(0.0, std::min(1.0, x)); }
+
 
 /*---- Conga-Tag -----*/
 
@@ -459,6 +466,81 @@ uint32_t CongaRouting::QuantizingX(uint32_t outPort, uint32_t X) {
         NS_LOG_FUNCTION("X" << X << "Ratio" << ratio << "Bits" << quantX << Simulator::Now());
     }
     return quantX;
+}
+
+bool CongaRouting::GetOneHopMetrics(uint32_t dstToRId, uint32_t outPort, OneHopMetrics* m) const {
+    if (!m) return false;
+    m->ce_local_norm = 0.0;
+    m->ce_remote_min_norm = 1.0;
+    m->age_norm = 1.0;
+    m->cov_norm = 0.0;
+    m->score = 1.0;
+
+    // local CE normalized
+    {
+        auto it = m_DreMap.find(outPort);
+        uint32_t qx = 0;
+        if (it != m_DreMap.end()) qx = const_cast<CongaRouting*>(this)->QuantizingX(outPort, it->second);
+        uint32_t qmax = (1u << m_quantizeBit) - 1u;
+        m->ce_local_norm = qmax ? double(qx)/double(qmax) : 0.0;
+    }
+
+    // only ToR has congaToLeaf info for remote feedback; others fallback to local only
+    if (!m_isToR) {
+        m->score = clamp01(m->ce_local_norm);
+        return true;
+    }
+
+    auto pathSetIt = m_congaRoutingTable.find(dstToRId);
+    if (pathSetIt == m_congaRoutingTable.end()) {
+        m->score = clamp01(m->ce_local_norm);
+        return false;
+    }
+
+    const auto& pathSet = pathSetIt->second;
+    uint32_t total_paths_under_port = 0, paths_with_fb = 0;
+    uint32_t remote_min_ce_q = UINT32_MAX;
+    Time remote_min_age = Seconds(0);
+
+    auto toLeafIt = m_congaToLeafTable.find(dstToRId);
+    if (toLeafIt != m_congaToLeafTable.end()) {
+        const auto& pathInfoMap = toLeafIt->second; // pathId -> OutpathInfo
+        for (auto pathId : pathSet) {
+            if (GetOutPortFromPath(pathId, 0) != outPort) continue;
+            total_paths_under_port++;
+            auto fb = pathInfoMap.find(pathId);
+            if (fb != pathInfoMap.end()) {
+                paths_with_fb++;
+                uint32_t ceq = fb->second._ce;
+                if (ceq < remote_min_ce_q) {
+                    remote_min_ce_q = ceq;
+                    remote_min_age = Simulator::Now() - fb->second._updateTime;
+                }
+            }
+        }
+    }
+
+    if (remote_min_ce_q != UINT32_MAX) {
+        uint32_t qmax = (1u << m_quantizeBit) - 1u;
+        m->ce_remote_min_norm = qmax ? double(remote_min_ce_q)/double(qmax) : 0.0;
+        double age_ratio = m_agingTime.GetSeconds() > 0 ?
+            remote_min_age.GetSeconds()/m_agingTime.GetSeconds() : 0.0;
+        m->age_norm = clamp01(age_ratio);
+    } else {
+        m->ce_remote_min_norm = 1.0; // treat as worst if no feedback
+        m->age_norm = 1.0;
+    }
+    m->cov_norm = (total_paths_under_port>0) ?
+        double(paths_with_fb)/double(total_paths_under_port) : 0.0;
+
+    double score_conga = std::max(m->ce_local_norm, m->ce_remote_min_norm);
+    m->score = clamp01(
+        w_conga*score_conga +
+        w_local*m->ce_local_norm +
+        w_age  *m->age_norm +
+        w_cov  *(1.0 - m->cov_norm)
+    );
+    return true;
 }
 
 void CongaRouting::SetConstants(Time dreTime, Time agingTime, Time flowletTimeout,

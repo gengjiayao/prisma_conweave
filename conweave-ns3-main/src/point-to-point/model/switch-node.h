@@ -47,18 +47,16 @@ class SwitchNode : public Node {
         bool         valid = false;
     };
 
-    bool                    m_rlBusy = false;   // 是否正等待 Python 动作
-    RlHeldPkt               m_rlHeld;           // 被挂起的包
     Ptr<Object> m_rlMgr;            // 外部注入的观测管理器
     EventId     m_rlTimeoutEv;      // RL 挂起兜底超时事件
     double      m_rlTimeoutUs = 100.0; // 兜底超时：100 微秒
 
-    /* 尝试挂起；返回 true 表示已挂起（后续由 RL 决策） */
-    bool RlMaybeHold(Ptr<NetDevice> inDev, Ptr<Packet> p, CustomHeader &ch);
+    /* 【改造】现在只负责将包“喂”给RL管理器，不自己决定是否挂起 */
+    void RlHandover(Ptr<NetDevice> inDev, Ptr<Packet> p, CustomHeader &ch);
 
     int GetOutDev(Ptr<Packet>, CustomHeader &ch);
     void SendToDev(Ptr<Packet> p, CustomHeader &ch);
-    void SendToDevContinue(Ptr<Packet> p, CustomHeader &ch);
+    
     static uint32_t EcmpHash(const uint8_t *key, size_t len, uint32_t seed);
     void CheckAndSendPfc(uint32_t inDev, uint32_t qIndex);
     void CheckAndSendResume(uint32_t inDev, uint32_t qIndex);
@@ -95,8 +93,9 @@ class SwitchNode : public Node {
 
 
    public:
-   /* 由 ConweaveRoutingEnv 在动作到达时调用，放行被挂起的包 */
-    void RlRelease(uint32_t outIf);
+   void SendToDevContinue(Ptr<Packet> p, CustomHeader &ch);
+   /* 由 ConweaveObsManager 在动作到达时调用，放行被挂起的包 */
+    void RlRelease(Ptr<Packet> p, CustomHeader& ch, uint32_t outIf);
     void RlTimeoutFallback();          // 超时回退（ECMP 放行）
 
     /* 仿真初始化阶段把 ObsManager 绑进来 */
@@ -125,6 +124,10 @@ class SwitchNode : public Node {
     void SetRlPreferredOutIf(uint32_t dstTorId, uint32_t outIf);
     // 如果存在一次性首选端口，返回 true 并通过 outIfOut 给出，同时从表中移除（只消费一次）
     bool TryConsumeRlPreferredOutIf(uint32_t dstTorId, uint32_t &outIfOut);
+
+    // -- 用于跨模块更新 RL 统计的静态函数 --
+    static void IncrementRlHeld();
+    static void IncrementRlBusySkip();
 };
 
 } /* namespace ns3 */

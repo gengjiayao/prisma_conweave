@@ -37,7 +37,7 @@ class Agent():
         """
         cl.G = params_dict["G"]
         cl.numNodes = params_dict["numNodes"]
-        cl.enabled_nodes = params_dict.get("enabled_nodes", list(range(cl.numNodes))) # 安全获取
+        cl.enabled_nodes = params_dict.get("enabled_nodes", list(range(cl.numNodes))) # 安全获取，只对leaf建模
         cl.stepTime = params_dict["stepTime"]
         cl.startSim = params_dict["startSim"]
         cl.numEpisodes = params_dict["numEpisodes"]

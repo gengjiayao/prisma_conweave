@@ -57,7 +57,7 @@ def parse_arguments():
     group4.add_argument('--traffic_matrix_index', type=int, help='Index of the traffic matrix', default=0)
     # group4.add_argument('--node_coordinates_path', type=str, help='Path to the nodes coordinates', default="examples/abilene/topology_files/node_coordinates.txt")
     group4.add_argument('--max_out_buffer_size', type=int, help='Network interfaces output buffer limit in bytes', default=16260)
-    group4.add_argument('--link_delay', type=int, help='Network links delay in ms', default="1")
+    group4.add_argument('--link_delay', type=int, help='Network links delay in ms', default=1)
     group4.add_argument('--packet_size', type=int, help='Size of the packets in bytes', default=512)
     group4.add_argument('--link_cap', type=int, help='Network links capacity in bits per seconds', default=500000)
     
@@ -103,10 +103,10 @@ def parse_arguments():
     group_conweave.add_argument('--lb', type=str, default='rl', help='LB mode')
     group_conweave.add_argument('--pfc', type=int, default=1, help='Enable PFC')
     group_conweave.add_argument('--irn', type=int, default=0, help='Enable IRN')
-    group_conweave.add_argument('--simul_time', type=float, default=0.001, help='Simulation time')
+    group_conweave.add_argument('--simul_time', type=float, default=0.3, help='Simulation time')
     group_conweave.add_argument('--buffer', type=int, default=9, help='Switch buffer size')
-    group_conweave.add_argument('--netload', type=int, default=6, help='Network load')
-    group_conweave.add_argument('--bw', type=int, default=100, help='NIC bandwidth')
+    group_conweave.add_argument('--netload', type=int, default=50, help='Network load')
+    group_conweave.add_argument('--bw', type=int, default=1, help='NIC bandwidth')
     #topo文件名
     group_conweave.add_argument('--topo', type=str, default='leaf_spine_128_100G_OS2', help='Topology name')
     #新增把conweave的拓扑存放位置作为参数，未来传给拓扑转化脚本

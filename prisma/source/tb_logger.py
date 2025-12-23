@@ -33,6 +33,22 @@ def custom_plots():
                                 title="Loss Ratio",
                                 multiline=layout_pb2.MultilineChartContent(tag=[r"loss_ratio_over_time"])),
                         ]),
+                    layout_pb2.Category(
+                        title="Reward metrics",
+                        chart=[
+                            layout_pb2.Chart(
+                                title="Global Reward (EWMA) over steps",
+                                multiline=layout_pb2.MultilineChartContent(
+                                    tag=[r"global_reward_ewma_over_steps"]
+                                )
+                            ),
+                            layout_pb2.Chart(
+                                title="Global Reward (EWMA) over time",
+                                multiline=layout_pb2.MultilineChartContent(
+                                    tag=[r"global_reward_ewma_over_time"]
+                                )
+                            ),
+                        ]),
                     # layout_pb2.Category(
                     #     title="Global info about the env",
                     #     chart=[

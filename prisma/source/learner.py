@@ -118,31 +118,35 @@ class DQN_AGENT(tf.Module):
       self.neighbors_target_upcoming_q_networks = []
       self.neighbors_target_temp_upcoming_q_networks = []
       
+      # compute per-neighbor feature factor K and residual
+      K = int((observation_shape[0] - 1) // num_actions)
+      residual = int(observation_shape[0] - 1 - num_actions * K)
       for neighbor in range(num_actions):
+        ndeg = int(neighbors_degrees[neighbor])
+        buf_len = int(ndeg * K)
+        obs_len = int(1 + buf_len + residual)
+        splits = [1, buf_len] + ([residual] if residual > 0 else [])
         with tf.name_scope(f'neighbor_target_q_network_{neighbor}'):
-                self.neighbors_target_q_networks.append(q_func((neighbors_degrees[neighbor]+observation_shape[0]-num_actions,), 
-                                                              neighbors_degrees[neighbor],
+                self.neighbors_target_q_networks.append(q_func((obs_len,), 
+                                                              ndeg,
                                                               num_nodes, 
-                                                              [1, neighbors_degrees[neighbor], 
-                                                               observation_shape[0]-num_actions -1]))
+                                                              splits))
         with tf.name_scope(f'neighbors_target_upcoming_q_network_{neighbor}'):
-                self.neighbors_target_upcoming_q_networks.append(q_func((neighbors_degrees[neighbor]+observation_shape[0]-num_actions,),
-                                                                       neighbors_degrees[neighbor], 
+                self.neighbors_target_upcoming_q_networks.append(q_func((obs_len,),
+                                                                       ndeg, 
                                                                        num_nodes, 
-                                                                       [1, neighbors_degrees[neighbor],
-                                                                        observation_shape[0]-num_actions -1]))
+                                                                       splits))
         with tf.name_scope(f'neighbors_target_temp_upcoming_q_network_{neighbor}'):
-                self.neighbors_target_temp_upcoming_q_networks.append(q_func((neighbors_degrees[neighbor]+observation_shape[0]-num_actions,), 
-                                                                            neighbors_degrees[neighbor], 
+                self.neighbors_target_temp_upcoming_q_networks.append(q_func((obs_len,), 
+                                                                            ndeg, 
                                                                             num_nodes, 
-                                                                            [1, neighbors_degrees[neighbor],
-                                                                             observation_shape[0]-num_actions -1]))
+                                                                            splits))
 
     #@tf.function
     def step(self, obs, stochastic=True, update_eps=-1, actions_probs=None):
         q_values = self.q_network(obs)
-        #deterministic_actions = tf.argmax(q_values, axis=1)
-        deterministic_actions = tf.argmin(q_values, axis=1)
+        deterministic_actions = tf.argmax(q_values, axis=1)
+        #deterministic_actions = tf.argmin(q_values, axis=1)
         if stochastic:
             batch_size = tf.shape(obs)[0]
             if actions_probs is None:
@@ -209,7 +213,7 @@ class DQN_AGENT(tf.Module):
             lock {threading.Lock} -- lock to use to access the target q network
         
         """
-        q_tp1 = tf.gather(self.q_network(obs1), filtered_indices, axis=1)
+        q_tp1 = tf.gather(self.target_q_network(obs1), filtered_indices, axis=1)
 
         #   if self.double_q:
         #     q_tp1_using_online_net = tf.gather(self.q_network(obs1), filtered_indices, axis=1)
@@ -217,8 +221,8 @@ class DQN_AGENT(tf.Module):
         #     q_tp1_best_using_online_net = tf.argmin(q_tp1_using_online_net, 1)
         #     q_tp1_best = tf.reduce_sum(q_tp1 * tf.one_hot(q_tp1_best_using_online_net, len(filtered_indices), dtype=tf.float32), 1)
         #   else:
-         #q_tp1_best = tf.reduce_max(q_tp1, 1)
-        q_tp1_best = tf.reduce_min(q_tp1, 1)
+        q_tp1_best = tf.reduce_max(q_tp1, 1)
+        #q_tp1_best = tf.reduce_min(q_tp1, 1) # origin,找最小
 
         dones = tf.cast(dones, q_tp1_best.dtype)
         q_tp1_best_masked = (1.0 - dones) * q_tp1_best
@@ -245,7 +249,8 @@ class DQN_AGENT(tf.Module):
         q_tp1 = tf.gather(self.neighbors_target_q_networks[neighbor_idx](obs1), filtered_indices, axis=1)
         #q_tp1 = self.neighbors_target_q_networks[neighbor_idx](obs1)
 
-        q_tp1_best = tf.reduce_min(q_tp1, 1)
+        #q_tp1_best = tf.reduce_min(q_tp1, 1)
+        q_tp1_best = tf.reduce_max(q_tp1, 1)
 
         dones = tf.cast(dones, q_tp1_best.dtype)
         q_tp1_best_masked = (1.0 - dones) * q_tp1_best

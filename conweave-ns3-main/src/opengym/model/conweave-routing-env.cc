@@ -359,7 +359,7 @@ ConweaveRoutingEnv:: NotifyPktRcv(Ptr<ConweaveRoutingEnv> entity,
 
   // 低频进度打印（可选）
   static uint64_t s_delivered = 0;
-  if ((++s_delivered % 500) == 0) {
+  if ((++s_delivered % 50000) == 0) {
     NS_LOG_UNCOND("[DEL] delivered=" << s_delivered
                    << " t=" << Simulator::Now().GetSeconds());
   }

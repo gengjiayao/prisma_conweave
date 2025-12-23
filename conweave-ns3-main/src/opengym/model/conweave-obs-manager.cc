@@ -10,12 +10,78 @@
 #include "ns3/qbb-channel.h"
 #include "ns3/data-rate.h"
 #include "ns3/conweave-routing.h"
+#include "ns3/conga-routing.h"
 #include <array>
 #include <cmath>
+#include <sstream>
+#include <unordered_map>
+#include <atomic>
+#include <mutex>
+#include <fstream>
+#include <cstdlib> // for std::getenv
+#include <iomanip> // for std::setprecision
+
+namespace {
+  std::atomic<uint64_t> S_seen{0}, S_gated{0}, S_bypass{0}, S_back{0}, S_fwd{0};
+  // NEW: Flowlet 总数（无论是否成功挂起）
+  std::atomic<uint64_t> S_flowletNew{0};
+  // NEW: 采纳一致性 + 长环路抽样，进程级聚合
+  std::atomic<uint64_t> S_decChosen{0}, S_decMatch{0}, S_decMismatch{0};
+  std::atomic<uint64_t> S_longLoopSample{0}, S_longLoopHit{0};
+  // NEW: ADH 字节加权统计
+  std::atomic<uint64_t> S_decMatchBytes{0}, S_decMismatchBytes{0};
+
+  // NEW: 按端口统计 dupACK/NACK，用于诊断乱序来源 (按流聚合)
+  struct FlowSeq {
+    uint32_t last_seq = 0;
+    uint32_t streak   = 0;   // 连续 repeat 的长度（可留作诊断）
+    double   ts       = 0.0;
+  };
+  struct DupAckPortStat {
+    uint64_t total_ctrl = 0;
+    uint64_t ack_total  = 0;
+    uint64_t nack_total = 0;
+
+    // 新增：分解 repeat / backstep / advance
+    uint64_t repeat_total   = 0;   // == 的总次数
+    uint64_t backstep_cnt   = 0;   // < 的总次数（我们认为的“dup(乱序)”）
+    uint64_t backstep_bytes = 0;   // 可选：观测回退幅度
+    uint64_t advance_cnt    = 0;   // > 的总次数
+
+    uint64_t max_streak = 0;
+    std::unordered_map<uint64_t, FlowSeq> flow_seq; // flowKey -> FlowSeq
+  };
+  std::map<uint32_t, DupAckPortStat> S_dupByIf; // key = outIf
+  std::mutex S_dupMutex;
+}
 
 namespace ns3 {
 
 NS_LOG_COMPONENT_DEFINE("ConweaveObsManager");
+void
+ConweaveObsManager::EnsureRewardCsvOpen()
+{
+  if (m_rewardCsvOpened) return;
+  const char* outEnv = std::getenv("MIX_OUTPUT_DIR");
+  std::string dir = (outEnv && *outEnv) ? std::string(outEnv) : std::string(".");
+
+  std::ostringstream oss;
+  oss << dir << "/reward_breakdown_sw"
+      << (m_sw ? m_sw->GetId() : 0)
+      << ".csv";
+  
+  m_rewardCsv.open(oss.str(), std::ios::out | std::ios::trunc);
+  if (!m_rewardCsv.is_open()){
+    NS_LOG_WARN("ConweaveObsManager: Failed to open reward CSV at " << oss.str());
+    return;
+  }
+
+  // 写CSV表头
+  m_rewardCsv << "time_sec,out_if,T,qSmooth,R_norm,R_qcn,r_inst,r_level,delta\n";
+  m_rewardCsv.flush();
+  m_rewardCsvOpened = true;
+  NS_LOG_INFO(" [RewardCSV] opened " << oss.str());
+}
 
 // Free-function thunk so MakeBoundCallback can bind 'this' and outIf
 static void Conweave_OnMacTxThunk(ConweaveObsManager* self, uint32_t outIf, Ptr<const Packet> p)
@@ -29,47 +95,136 @@ void
 ConweaveObsManager::OnPerHopPacket(Ptr<SwitchNode> sw,
                                    Ptr<NetDevice> inDev,
                                    Ptr<Packet> p,
-                                   const CustomHeader& ch)
+                                   CustomHeader& ch)
 {
-  if (m_busy) return;          // 单并发保护
+  m_seenPkts++; S_seen++;
+  if (m_busy) { 
+    m_bypassPkts++; S_bypass++; 
+    SwitchNode::IncrementRlBusySkip(); // <--- 在这里更新全局统计
+    sw->SendToDevContinue(p, ch); // <---【重要】被绕过的包需要继续转发
+    return;
+  }
 
-  /* 1. 保存挂起上下文 */
-  m_busy        = true;
-  m_swHeld      = sw;
-  m_pktHeld     = p;
-  m_chHeld      = ch;
-  m_pktUidHeld  = p->GetUid();
+  // 轻量采样：使用局部 uid，不依赖挂起上下文
+  uint64_t uidLocal = p->GetUid();
+  if ((uidLocal % 1024) == 0) { // 抽样 1/1024
+    m_longLoopSample++; S_longLoopSample++;
+    auto &rec = m_seenSwByUid[uidLocal];
+    if (rec.first == sw->GetId()) { m_longLoopHit++; S_longLoopHit++; }  // 再次进入同一交换机
+    rec.first = sw->GetId();
+    rec.second++;
+    if (rec.second > 64) m_seenSwByUid.erase(uidLocal); // 避免泄露
+  }
 
-  /* 2. 解析目的 overlay */
+  if (inDev) {
+    m_lastInIf = inDev->GetIfIndex();
+  }
+
+  /* 2. 解析目的 overlay + flowKey */
   uint32_t dip = ch.dip;
   auto itTor = Settings::hostIp2SwitchId.find(dip);
   int dstOverlay = -1;
+  uint32_t dstTorId = 0;
   if (itTor != Settings::hostIp2SwitchId.end()) {
-    uint32_t dstTor = itTor->second;
-    if (dstTor < m_nodeIdToOverlay.size()) dstOverlay = m_nodeIdToOverlay[dstTor];
+    dstTorId = itTor->second;
+    if (dstTorId < m_nodeIdToOverlay.size()) dstOverlay = m_nodeIdToOverlay[dstTorId];
   }
 
-  /* 3. 更新包上下文（用于GetExtraInfo）*/
-  SetCurrentPacketContext(m_pktUidHeld, p->GetSize());
-  m_globalInjected++;  // 更新统计
+  // 生成 flowKey（UDP/TCP，否则回退为 IP 对）
+  uint64_t flowKey = 0;
+  if (ch.udp.sport || ch.udp.dport) {
+    flowKey = ConWeaveRouting::GetFlowKey(ch.sip, ch.dip, ch.udp.sport, ch.udp.dport);
+  } else if (ch.tcp.sport || ch.tcp.dport) {
+    flowKey = ConWeaveRouting::GetFlowKey(ch.sip, ch.dip, ch.tcp.sport, ch.tcp.dport);
+  } else {
+    flowKey = ConWeaveRouting::GetFlowKey(ch.sip, ch.dip, 0, 0);
+  }
 
-  /* 4. 构造特征：[dstOverlay] + 各邻居出口队列长度 */
+  // ===== Flowlet gating: 仅在新 flowlet 首包且允许切换时挂起，请求动作 =====
+  double now = Simulator::Now().GetSeconds();
+  auto &ctx = m_flowlets[flowKey];
+  bool firstEver = (ctx.lastSeenSec <= 0.0);
+  bool newFlowlet = false;
+  if (firstEver) newFlowlet = true; else if ((now - ctx.lastSeenSec) > m_flowletGapSec) newFlowlet = true;
+  if (newFlowlet) { S_flowletNew++; }
+  bool canSwitch = (now >= ctx.lockedUntilSec);
+  ctx.lastSeenSec = now;
+  ctx.pktsInFlowlet += 1;
+  ctx.bytesInFlowlet += p->GetSize();
+
+  if (newFlowlet && canSwitch && !ctx.awaitingAction) {
+    ctx.awaitingAction = true;
+    ctx.startSec = now;
+    ctx.pktsInFlowlet = 1;
+    ctx.bytesInFlowlet = p->GetSize();
+
+    // -- 更新全局 held 统计 --
+    SwitchNode::IncrementRlHeld();
+
+    // —— 原有“挂起 + 构造观测”路径 ——
+    m_busy        = true;
+    m_swHeld      = sw;
+    m_pktHeld     = p;
+    m_chHeld      = ch;
+    m_pktUidHeld  = p->GetUid();
+    m_flowletKeyHeld = flowKey;
+
+  /* 3. 更新包上下文（用于GetExtraInfo）；仅首次见到该包累计 injected 并记录首见时间 */
+  SetCurrentPacketContext(m_pktUidHeld, p->GetSize());
+  if (m_seen.find(m_pktUidHeld) == m_seen.end()) {
+    m_seen[m_pktUidHeld] = true;
+    m_firstSeenSec[m_pktUidHeld] = Simulator::Now().GetSeconds();
+    m_globalInjected++;
+  }
+
+  /* 4. 构造特征：[dstOverlay] + 每邻居出口5维（cost, ce_local, ce_remote_min, age, cov） */
   std::vector<uint32_t> feats;
-  feats.reserve(1 + m_overlayNeighbors.size());
+  feats.reserve(1 + m_overlayNeighbors.size() * kFeatsPerEgress);
   feats.push_back((uint32_t)std::max(0, dstOverlay));
 
   for (size_t i = 0; i < m_overlayNeighbors.size(); ++i) {
     uint32_t ifx = (i < m_egressIfs.size() ? m_egressIfs[i] : 0);
-    uint32_t qlen = 0;
+
+    // 基线：本地队列字节
+    uint32_t localQBytes = 0;
     if (ifx > 0 && ifx < sw->GetNDevices()) {
       Ptr<QbbNetDevice> dev = DynamicCast<QbbNetDevice>(sw->GetDevice(ifx));
-      if (dev && dev->GetQueue()) qlen = dev->GetQueue()->GetNBytesTotal();
+      if (dev && dev->GetQueue()) localQBytes = dev->GetQueue()->GetNBytesTotal();
     }
-    feats.push_back(qlen);
+
+    // 默认值（回退）：cost=localQBytes，其余四项=0
+    uint32_t cost_bytes = localQBytes;
+    uint32_t ce_local_b = 0, ce_remote_b = 0, age_b = 0, cov_b = 0;
+
+    // 优先：使用 CONGA 一跳融合指标，将各项(0..1)映射到 ~BDP 字节量级
+    if (sw && sw->m_mmu) {
+      CongaRouting::OneHopMetrics m; 
+      if (sw->m_mmu->m_congaRouting.GetOneHopMetrics(dstTorId, ifx, &m)) {
+        auto clamp01 = [](double x){ return std::min(1.0, std::max(0.0, x)); };
+        double bw = ResolveLinkBandwidthBps(ifx);
+        double bdpBytes = std::max(1.0, bw * m_rttGuessSec / 8.0);
+        cost_bytes  = (uint32_t)std::lround(clamp01(m.score)              * bdpBytes);
+        ce_local_b  = (uint32_t)std::lround(clamp01(m.ce_local_norm)      * bdpBytes);
+        ce_remote_b = (uint32_t)std::lround(clamp01(m.ce_remote_min_norm) * bdpBytes);
+        age_b       = (uint32_t)std::lround(clamp01(m.age_norm)           * bdpBytes);
+        cov_b       = (uint32_t)std::lround(clamp01(m.cov_norm)           * bdpBytes);
+      }
+    }
+
+    feats.push_back(cost_bytes);
+    feats.push_back(ce_local_b);
+    feats.push_back(ce_remote_b);
+    feats.push_back(age_b);
+    feats.push_back(cov_b);
   }
-  SetCurrentPacketContext(m_pktUidHeld, p->GetSize());
-  /* 4. 直接走你现有的 ZMQ 发送路径 */
-  PrepareAndSendObservation(dstOverlay, feats, m_pktUidHeld, sw->GetId());
+    
+    /* 4. 直接走你现有的 ZMQ 发送路径 */
+    PrepareAndSendObservation(dstOverlay, feats, m_pktUidHeld, sw->GetId());
+    return; // 仅首包挂起，其余包不挂起
+  }
+
+  // 非首包或未过最小驻留：不挂起，直接按已有策略转发
+  sw->SendToDevContinue(p, ch);
 }
 
 /* ****************  2. 把观测喂给 Python（复用你现有路径）  **************** */
@@ -79,6 +234,7 @@ ConweaveObsManager::PrepareAndSendObservation(int dstOverlay,
                                               uint64_t pktUid,
                                               uint32_t swId)
 {
+  m_gatedPkts++; S_gated++;
   m_lastObsFeats   = feats;
   m_lastDstOverlay = dstOverlay;
   m_lastPktId      = pktUid;
@@ -88,22 +244,24 @@ ConweaveObsManager::PrepareAndSendObservation(int dstOverlay,
 
   // === 构造 Python 期望的 info 串（数据包：pkt_type=0） ===
   const double now = Simulator::Now().GetSeconds();
-  // 这里我们没有逐跳 e2e 延迟/成本统计，用 0 占位即可；全局计数用已有成员
+  // 计算全局平均 e2e 与 cost（示例定义：与 gAvgE2E 一致）
+  const double gAvgE2E = (m_globalDelivered > 0) ? (m_sumE2E / std::max(1.0, (double)m_globalDelivered)) : 0.0;
+  const double gCost   = gAvgE2E;
   std::ostringstream oss;
   oss.setf(std::ios::fixed); oss.precision(9); // 时间用秒，小数位给足
-  oss << "delay_time=" << 0.0
+  oss << "delay_time=" << m_lastDeliveredDelaySec
       << ",pkt_size=" << m_lastPktSize
       << ",curr_time=" << now
       << ",pkt_id=" << pktUid
       << ",pkt_type=" << 0
-      << ",avg_e2e=" << 0.0
-      << ",cost=" << 0.0
-      << ",global_avg_e2e=" << 0.0
-      << ",global_cost=" << 0.0
-      << ",dropped=" << 0
-      << ",delivered=" << 0
+      << ",avg_e2e=" << gAvgE2E
+      << ",cost=" << gCost
+      << ",global_avg_e2e=" << gAvgE2E
+      << ",global_cost=" << gCost
+      << ",dropped=" << m_stepDropped
+      << ",delivered=" << m_stepDelivered
       << ",injected=" << m_globalInjected
-      << ",buffered=" << m_globalBuffered
+      << ",buffered=" << m_stepBuffered
       << ",global_dropped=" << m_globalDropped
       << ",global_delivered=" << m_globalDelivered
       << ",global_injected=" << m_globalInjected
@@ -115,6 +273,10 @@ ConweaveObsManager::PrepareAndSendObservation(int dstOverlay,
 
   // 发通知
   NotifyGymCurrentState();
+  // 重置步进统计，确保下一步只反映增量
+  m_stepDelivered = 0;
+  m_stepDropped   = 0;
+  m_stepBuffered  = 0;
 }
 
 // -- 补全：overlay 邻居索引 -> 对齐的 egress ifIndex 映射（防御：越界返回 0）
@@ -153,6 +315,20 @@ ConweaveObsManager::RegisterEgressTracing(Ptr<SwitchNode> sw)
 void
 ConweaveObsManager::OnMacTx(uint32_t outIf, Ptr<const Packet> p)
 {
+  if (p) {
+    auto uid = p->GetUid();
+    auto it = m_decisionByUid.find(uid);
+    if (it != m_decisionByUid.end()) {
+      if (it->second == outIf) {
+        m_decMatch++; S_decMatch++;
+        S_decMatchBytes += p->GetSize();
+      } else {
+        m_decMismatch++; S_decMismatch++;
+        S_decMismatchBytes += p->GetSize();
+      }
+      m_decisionByUid.erase(it); // 只统计第一次命中
+    }
+  }
   if (!p) return;
   auto it = m_portStats.find(outIf);
   if (it == m_portStats.end()) {
@@ -219,12 +395,16 @@ double ConweaveObsManager::MapQueueToScoreAcc(double L, const std::array<double,
 std::array<double,10> ConweaveObsManager::BuildQueueStepsBDP(double bwBps, double rttSec)
 {
   std::array<double,10> E{};
-  double Lmin = 64 * 1024; // 64KB minimum
   double bdpBytes = bwBps * rttSec / 8.0;
-  double Lmax = std::max(256.0*1024, std::min(bdpBytes, 16.0*1024*1024)); // BDP-based max, capped at 16MB
-  double base = Lmax / Lmin;
-  if (!std::isfinite(base) || base <= 1.0) base = 1.000001;
-  double ratio = std::pow(base, 1.0/9.0);
+
+  // 新刻度：在 BDP 的 1/4 ~ 4 倍之间等比 10 段，并夹在 [32KB, 16MB]
+  double Lmin = std::max(32.0*1024, 0.25 * bdpBytes);
+  double Lmax = std::min(16.0*1024*1024, 4.0 * bdpBytes);
+  if (!std::isfinite(Lmax) || Lmax <= Lmin) {
+    Lmin = 64*1024; Lmax = 512*1024; // 兜底
+  }
+  
+  double ratio = std::pow(Lmax / Lmin, 1.0/9.0);
   
   E[0] = Lmin;
   for (int i = 1; i < 10; ++i) {
@@ -242,122 +422,515 @@ ConweaveObsManager::ResolveLinkBandwidthBps(uint32_t outIf)
   // the code compiles and yields usable reward signals (util-based)
   // while a follow-up patch can extract the real DataRate from device
   // attributes when available.
-  return 100e9; // 100 Gbps
+  //return 100e9; // 100 Gbps
+  return 1e9; //1Gbps
 }
 
+// double
+// ConweaveObsManager::ComputeReward()
+// {
+//   const double kEps = 1e-9;
+//   auto itps = m_portStats.find(m_lastActionOutIf);
+//   if (itps == m_portStats.end()) {
+//     return 0.0; // 该端口目前还没有统计，直接返回
+//   }
+//   EgressPortStats& st = itps->second;
+
+//   double now = Simulator::Now().GetSeconds();
+
+//   auto safe = [](double x) {
+//     return std::isfinite(x) ? x : 0.0;
+//   };
+//   auto clamp01 = [](double x) {
+//     return std::min(1.0, std::max(0.0, x));
+//   };
+
+//   if (st.winStartSec == 0.0) { // 冷启动
+//       st.winStartSec = now - std::max(1e-6, m_rewardWinSec);
+//   }
+//   double span = now - st.winStartSec;
+//   if (span <= kEps) span = kEps;      // 绝不让窗口为 0
+
+//   // === 1) 窗口未就绪：直接返回“上一次窗口值”（不更新任何状态） ===
+//   const double W = m_rewardWinSec;
+//   double byteTrigger = (st.ackBytesWin >= m_rewardByteMin);
+//   if (span < W && !byteTrigger) {
+//     auto itp = m_prevRByIf.find(m_lastActionOutIf);
+//     return (itp != m_prevRByIf.end()) ? itp->second : 0.0;
+//   }
+
+//   // // === 2) 计算本窗口的 r （与你原逻辑一致） ===
+//   // double bwBps = (st.bwBps > kEps) ? st.bwBps : ResolveLinkBandwidthBps(m_lastActionOutIf);
+
+//   // double T_win = 0.0;
+//   // {
+//   //   double denom = std::max(kEps, bwBps) * std::max(kEps, span);
+//   //   double numBits = 0.0;
+//   //   if (st.ackBytesWin > 0) numBits = 8.0 * st.ackBytesWin;
+//   //   // A1) 去掉 accTxBytes 回退
+//   //   // else if (st.accTxBytes > 0) numBits = 8.0 * st.accTxBytes;
+//   //   T_win = std::min(1.0, numBits / denom);
+//   // }
+
+//   // double T_ema = 0.0;
+//   // auto itAw2 = m_ackWins.find(m_lastActionOutIf);
+//   // if (itAw2 == m_ackWins.end()) {
+//   //   itAw2 = m_ackWins.insert({m_lastActionOutIf, AckWin()}).first;
+//   // }
+//   // T_ema = std::min(1.0, std::max(0.0, itAw2->second.emaGoodput / std::max(kEps, bwBps)));
+//   // // 调稳：更信任 EMA，减小瞬时窗口的噪声影响
+//   // double T = (T_ema > 0.0) ? (0.3 * T_win + 0.7 * T_ema) : T_win;
+
+//     // === 2) 计算本窗口的 r ===
+//     double bwBps = (st.bwBps > kEps) ? st.bwBps : ResolveLinkBandwidthBps(m_lastActionOutIf);
+
+//     // --- NEW: per-flow EMA aggregation for throughput ---
+//     double sumFlowBps = 0.0;
+//     uint32_t activeFlows = 0;
+  
+//     for (const auto &kv : m_flow2OutIf) {
+//       const auto &fm = kv.second;
+//       // 只看当前动作端口上的映射
+//       if (fm.outIf != m_lastActionOutIf) continue;
+//       // 丢弃过老的映射，避免僵尸流
+//       if ((now - fm.ts) > m_flowMapTtlSec) continue;
+  
+//       auto itFs = m_flowStats.find(kv.first);
+//       if (itFs == m_flowStats.end()) continue;
+  
+//       double bps = itFs->second.emaBps;
+//       if (!std::isfinite(bps) || bps <= 0.0) continue;
+  
+//       sumFlowBps += bps;
+//       activeFlows += 1;
+//     }
+  
+//     // 归一化：仍然用链路带宽，物理意义 = 端口利用率
+//     double T = 0.0;
+//     if (bwBps > kEps && sumFlowBps > 0.0) {
+//       T = sumFlowBps / bwBps;
+//     }
+//     T = clamp01(safe(T));
+  
+//     // 占位：为兼容后面 sanitize 逻辑，T_win/T_ema 保留变量但置 0
+//     double T_win = 0.0;
+//     double T_ema = 0.0;
+  
+  
+//   double Lavg = st.queueIntBytes / std::max(kEps, span);
+//   double qScore = MapQueueToScoreAcc(Lavg, st.qSteps);
+//   st.qSmooth = (1.0 - m_qSmoothLambda) * st.qSmooth + m_qSmoothLambda * qScore;
+
+//   double R_sw = 0.0;
+//   auto itAw = m_ackWins.find(m_lastActionOutIf);
+//   if (itAw != m_ackWins.end())
+//     R_sw = std::min(1.0, std::max(0.0, itAw->second.emaDup));
+
+//   double R_flow = -1.0;
+//   {
+//     double sumDup = 0.0; uint32_t cnt = 0;
+//     for (const auto &kv : m_flow2OutIf) {
+//       const auto &fm = kv.second;
+//       if (fm.outIf != m_lastActionOutIf) continue;
+//       if ((now - fm.ts) > m_flowMapTtlSec) continue;
+//       auto itfs = m_flowStats.find(kv.first);
+//       if (itfs == m_flowStats.end()) continue;
+//       sumDup += std::max(0.0, std::min(1.0, itfs->second.emaDup));
+//       cnt += 1;
+//     }
+//     if (cnt > 0) R_flow = sumDup / double(cnt);
+//   }
+//   double R_norm = (R_flow >= 0.0 ? R_flow : R_sw);
+
+//   double w_dup = std::max(0.0, (m_rewardWDup > 0.0 ? m_rewardWDup : 1.0 - (m_rewardWUtil + m_rewardWQueue)));
+
+//   // // 端口均衡项：以“本窗已观测端口的 qSmooth 与全端口均值”的差异抑制扎堆11.28注释掉暂时无用，可能起反作用
+//   // double balance = 0.0;
+//   // if (m_rewardWBalance > 0.0) {
+//   //   double sumQ = 0.0; double cntQ = 0.0;
+//   //   for (const auto &kv : m_portStats) {
+//   //     // 只统计最近活跃过的端口（有窗口起点）
+//   //     if (kv.second.winStartSec > 0.0) { sumQ += kv.second.qSmooth; cntQ += 1.0; }
+//   //   }
+//   //   if (cntQ > 0.0) {
+//   //     double meanQ = sumQ / cntQ;
+//   //     // qSmooth 高于均值的端口给一个负向偏置（鼓励走低负载端口）
+//   //     balance = std::max(-1.0, std::min(1.0, meanQ - st.qSmooth));
+//   //   }
+//   // }
+  
+//   // B1) 新增 QCN/NACK 惩罚
+//   double R_qcn = 0.0;
+//   if (st.ackWinCtrl + st.nackWinCtrl > 0) {
+//     R_qcn = double(st.nackWinCtrl) / double(st.ackWinCtrl + st.nackWinCtrl);
+//   }
+
+//   double r_inst = m_rewardWUtil * T 
+//                 + m_rewardWQueue * st.qSmooth 
+//                 + w_dup * (1.0 - R_norm) 
+//                 //+ m_rewardWBalance * balance
+//                 + m_rewardWQcn * (1.0 - R_qcn);
+
+//   double r_prev = 0.0;
+//   auto itPrev = m_prevRByIf.find(m_lastActionOutIf);
+//   if (itPrev != m_prevRByIf.end()) r_prev = itPrev->second;
+//   double r = 0.7 * r_inst + 0.3 * r_prev;
+
+//   // sanitize before logging
+//   //auto clamp01 = [](double x){ return std::min(1.0, std::max(0.0, x)); };
+//   //auto safe     = [](double x){ return std::isfinite(x) ? x : 0.0; };
+//   T_win = clamp01(safe(T_win));
+//   T_ema = clamp01(safe(T_ema));
+//   T     = clamp01(safe(T));
+//   st.qSmooth = clamp01(safe(st.qSmooth));
+//   R_sw = clamp01(safe(R_sw));
+//   if (R_flow >= 0.0) R_flow = clamp01(safe(R_flow));
+//   R_norm = clamp01(safe(R_norm));
+//   R_qcn = clamp01(safe(R_qcn));
+//   //r_inst = safe(r_inst);
+//   //r = safe(r);
+//   r_inst = clamp01(safe(r_inst));
+//   r = clamp01(safe(r));
+
+//   // === 3) 把“窗口内增量”缓存到 pending：delta = r - r_prev ===
+//   double delta = r - r_prev;
+//   m_pendingDeltaByIf[m_lastActionOutIf] += delta;
+//   m_prevRByIf[m_lastActionOutIf] = r;
+
+//   // ====3.5 记录CSV：每次窗口关闭输出一行 ====
+//   EnsureRewardCsvOpen();
+//   if (m_rewardCsvOpened) {
+//     m_rewardCsv << std::fixed << std::setprecision(9)
+//                 << now << ","
+//                 << m_lastActionOutIf << ","
+//                 << T << ","
+//                 << st.qSmooth << ","
+//                 << R_norm << ","
+//                 << R_qcn << ","
+//                 << r_inst << ","
+//                 << r << ","
+//                 << delta << "\n";
+//   }
+  
+//   // === 4) 重置窗口累计 ===
+//   st.winStartSec = now;
+//   st.lastQueueSampleSec = now;
+//   st.ackBytesWin = 0;
+//   st.queueIntBytes = 0.0;
+//   st.accTxBytes = 0;
+//   // B1) 重置窗内计数
+//   st.ackWinCtrl = 0;
+//   st.nackWinCtrl = 0;
+
+//   // === 5) 日志关闭：禁用 [RW] win_close 打印，避免同步 I/O 降速 ===
+//   // （保留空块以便将来恢复）
+//   if (false) { // 启用周期性进度日志（降频）
+//     static double lastPrint = 0.0;
+//     const double printInterval = 0.00050; // 每 0.5ms 打印一次仿真进度
+//     if (now - lastPrint >= printInterval) {
+//       NS_LOG_UNCOND("[PROGRESS] t=" << now);
+//       lastPrint = now;
+//     }
+//   }
+  
+//   // H2: 统计窗口关闭次数
+//   static std::unordered_map<uint32_t,uint64_t> s_winCloseCnt;
+//   s_winCloseCnt[m_lastActionOutIf]++;
+  
+//   // 在析构函数中添加打印逻辑
+//   struct WinClosesPrinter {
+//     ~WinClosesPrinter() {
+//       for (auto& kv : s_winCloseCnt) {
+//         NS_LOG_UNCOND("[WIN] if=" << kv.first << " closes=" << kv.second);
+//       }
+//       // 追加 COVER/LOOP 汇总（进程级）
+//       const double cover = (S_seen > 0 ? double(S_gated) / double(S_seen) : 0.0);
+//       const double loopr = ((S_back + S_fwd) > 0 ? double(S_back) / double(S_back + S_fwd) : 0.0);
+//       NS_LOG_UNCOND("[COVER] seen=" << S_seen << " gated=" << S_gated
+//                       << " bypass=" << S_bypass << " cover=" << cover);
+//       // Flowlet 粒度覆盖情况
+//       const double hold_ratio = (S_flowletNew > 0 ? double(S_gated) / double(S_flowletNew) : 0.0);
+//       NS_LOG_UNCOND("[FLOWLET] new=" << S_flowletNew
+//                      << " held=" << S_gated
+//                      << " hold_ratio=" << hold_ratio);
+//       NS_LOG_UNCOND("[LOOP] back=" << S_back << " fwd=" << S_fwd
+//                       << " ratio=" << loopr);
+//       NS_LOG_UNCOND("[ADH] chosen=" << S_decChosen
+//                      << " match=" << S_decMatch
+//                      << " mismatch=" << S_decMismatch
+//                      << " ratio=" << (S_decChosen ? double(S_decMatch) / S_decChosen : 0.0)
+//                      << " observed=" << (S_decChosen ? double(S_decMatch + S_decMismatch) / S_decChosen : 0.0));
+
+//       NS_LOG_UNCOND("[LOOP-LONG] sample=" << S_longLoopSample
+//                      << " hit=" << S_longLoopHit
+//                      << " ratio=" << (S_longLoopSample ? double(S_longLoopHit) / S_longLoopSample : 0.0));
+
+//       // 字节加权版本，便于对齐不同大小包的影响
+//       const uint64_t obsBytes = S_decMatchBytes + S_decMismatchBytes;
+//       const double adh_bytes_ratio = (obsBytes ? double(S_decMatchBytes) / double(obsBytes) : 0.0);
+//       NS_LOG_UNCOND("[ADH-B] match_bytes=" << S_decMatchBytes
+//                      << " mismatch_bytes=" << S_decMismatchBytes
+//                      << " ratio=" << adh_bytes_ratio);
+      
+//       // NEW: 打印按端口的 dupACK/NACK 统计 (按流聚合+三分支)
+//       NS_LOG_UNCOND("--- Per-Port DUP/NACK Stats (Flow-Aggregated, Backstep-as-DUP) ---");
+//       for (const auto& kv : S_dupByIf) {
+//         const auto& st = kv.second;
+//         if (st.total_ctrl == 0) continue;
+//         const double ack_backstep_ratio    = st.ack_total ? double(st.backstep_cnt) / st.ack_total : 0.0;
+//         const double ack_repeat_per_adv    = (st.advance_cnt ? double(st.repeat_total) / st.advance_cnt : 0.0);
+//         const double nack_ratio            = double(st.nack_total) / st.total_ctrl;
+
+//         NS_LOG_UNCOND("[DUPACK] if=" << kv.first
+//                        << " backstep_ratio=" << ack_backstep_ratio
+//                        << " repeat_per_adv=" << ack_repeat_per_adv
+//                        << " nack_ratio=" << nack_ratio
+//                        << " backsteps=" << st.backstep_cnt
+//                        << " repeats=" << st.repeat_total
+//                        << " advances=" << st.advance_cnt
+//                        << " total_ack=" << st.ack_total
+//                        << " nack=" << st.nack_total
+//                        << " max_streak_repeat=" << st.max_streak);
+//       }
+//     }
+//   };
+//   static WinClosesPrinter printer;
+
+//   return r;
+// }
 double
 ConweaveObsManager::ComputeReward()
 {
   const double kEps = 1e-9;
+
+  // 1) 没有历史统计时直接返回 0
   auto itps = m_portStats.find(m_lastActionOutIf);
   if (itps == m_portStats.end()) {
-    return 0.0; // 该端口目前还没有统计，直接返回
+    return 0.0;
   }
   EgressPortStats& st = itps->second;
 
   double now = Simulator::Now().GetSeconds();
 
-  if (st.winStartSec == 0.0) { // 冷启动
-      st.winStartSec = now - std::max(1e-6, m_rewardWinSec);
-  }
-  double span = now - st.winStartSec;
-  if (span <= kEps) span = kEps;      // 绝不让窗口为 0
+  auto safe = [](double x) {
+    return std::isfinite(x) ? x : 0.0;
+  };
+  auto clamp01 = [](double x) {
+    return std::min(1.0, std::max(0.0, x));
+  };
 
-  // === 1) 窗口未就绪：直接返回“上一次窗口值”（不更新任何状态） ===
-  const double W = m_rewardWinSec;
-  double byteTrigger = (st.ackBytesWin >= m_rewardByteMin);
-  if (span < W && !byteTrigger) {
-    auto itp = m_prevRByIf.find(m_lastActionOutIf);
-    return (itp != m_prevRByIf.end()) ? itp->second : 0.0;
-  }
+  // =========================
+  // 1) 利用 per-flow EMA 做端口利用率 T
+  // =========================
 
-  // === 2) 计算本窗口的 r （与你原逻辑一致） ===
   double bwBps = (st.bwBps > kEps) ? st.bwBps : ResolveLinkBandwidthBps(m_lastActionOutIf);
 
-  double T_win = 0.0;
-  {
-    double denom = std::max(kEps, bwBps) * std::max(kEps, span);
-    double numBits = 0.0;
-    if (st.ackBytesWin > 0) numBits = 8.0 * st.ackBytesWin;
-    else if (st.accTxBytes > 0) numBits = 8.0 * st.accTxBytes;
-    T_win = std::min(1.0, numBits / denom);
+  double sumFlowBps = 0.0;
+  uint32_t activeFlows = 0;
+
+  for (const auto &kv : m_flow2OutIf) {
+    const auto &fm = kv.second;
+    // 只看当前动作端口
+    if (fm.outIf != m_lastActionOutIf) continue;
+    // 丢掉太老的 flow 映射，避免僵尸数据
+    if ((now - fm.ts) > m_flowMapTtlSec) continue;
+
+    auto itFs = m_flowStats.find(kv.first);
+    if (itFs == m_flowStats.end()) continue;
+
+    double bps = itFs->second.emaBps;
+    if (!std::isfinite(bps) || bps <= 0.0) continue;
+
+    sumFlowBps += bps;
+    activeFlows += 1;
   }
 
-  double T_ema = 0.0;
-  auto itAw2 = m_ackWins.find(m_lastActionOutIf);
-  if (itAw2 == m_ackWins.end()) {
-    itAw2 = m_ackWins.insert({m_lastActionOutIf, AckWin()}).first;
+  double T = 0.0;
+  if (bwBps > kEps && sumFlowBps > 0.0) {
+    // 端口利用率（所有映射到该端口的 flow 之和 / 端口带宽）
+    T = sumFlowBps / bwBps;
   }
-  T_ema = std::min(1.0, std::max(0.0, itAw2->second.emaGoodput / std::max(kEps, bwBps)));
-  // 调稳：更信任 EMA，减小瞬时窗口的噪声影响
-  double T = (T_ema > 0.0) ? (0.3 * T_win + 0.7 * T_ema) : T_win;
+  T = clamp01(safe(T));
 
-  double Lavg = st.queueIntBytes / std::max(kEps, span);
-  double qScore = MapQueueToScoreAcc(Lavg, st.qSteps);
+  // =========================
+  // 2) 队列项：直接用 avgQueueBytes + ACC 阶梯打分
+  // =========================
+
+  double L = st.avgQueueBytes;  // OnMacTx 里已经做过 EMA
+  double qScore = MapQueueToScoreAcc(L, st.qSteps);
   st.qSmooth = (1.0 - m_qSmoothLambda) * st.qSmooth + m_qSmoothLambda * qScore;
+  st.qSmooth = clamp01(safe(st.qSmooth));
+
+  // =========================
+  // 3) 乱序 / dup 项：R_norm
+  // =========================
 
   double R_sw = 0.0;
-  if (auto itAw = m_ackWins.find(m_lastActionOutIf); itAw != m_ackWins.end())
-    R_sw = std::min(1.0, std::max(0.0, itAw->second.emaDup));
+  auto itAw = m_ackWins.find(m_lastActionOutIf);
+  if (itAw != m_ackWins.end()) {
+    R_sw = clamp01(safe(itAw->second.emaDup));  // 端口级 dup EMA
+  }
 
   double R_flow = -1.0;
   {
-    double sumDup = 0.0; uint32_t cnt = 0;
+    double sumDup = 0.0;
+    uint32_t cnt = 0;
     for (const auto &kv : m_flow2OutIf) {
       const auto &fm = kv.second;
       if (fm.outIf != m_lastActionOutIf) continue;
       if ((now - fm.ts) > m_flowMapTtlSec) continue;
-      auto itfs = m_flowStats.find(kv.first);
-      if (itfs == m_flowStats.end()) continue;
-      sumDup += std::max(0.0, std::min(1.0, itfs->second.emaDup));
+      auto itFs = m_flowStats.find(kv.first);
+      if (itFs == m_flowStats.end()) continue;
+      double dup = clamp01(safe(itFs->second.emaDup));
+      sumDup += dup;
       cnt += 1;
     }
-    if (cnt > 0) R_flow = sumDup / double(cnt);
+    if (cnt > 0) {
+      R_flow = sumDup / double(cnt);
+    }
   }
+
   double R_norm = (R_flow >= 0.0 ? R_flow : R_sw);
 
-  double w_dup = std::max(0.0, (m_rewardWDup > 0.0 ? m_rewardWDup : 1.0 - (m_rewardWUtil + m_rewardWQueue)));
-  double r_inst = m_rewardWUtil * T + m_rewardWQueue * st.qSmooth + w_dup * (1.0 - R_norm);
+  // =========================
+  // 4) QCN / NACK 惩罚项（当前权重已设为 0，可视为占位）
+  // =========================
 
+  double R_qcn = 0.0;
+  if (st.ackWinCtrl + st.nackWinCtrl > 0) {
+    R_qcn = double(st.nackWinCtrl) / double(st.ackWinCtrl + st.nackWinCtrl);
+  }
+  R_qcn = clamp01(safe(R_qcn));
+
+  // =========================
+  // 5) 拼 reward：T + 队列 + 乱序 + （可选）QCN
+  // =========================
+
+  double w_dup = std::max(0.0, (m_rewardWDup > 0.0 ? m_rewardWDup
+                                                   : 1.0 - (m_rewardWUtil + m_rewardWQueue)));
+
+  double r_inst = m_rewardWUtil * T
+                + m_rewardWQueue * st.qSmooth
+                + w_dup * (1.0 - R_norm)
+                + m_rewardWQcn * (1.0 - R_qcn);
+  r_inst = clamp01(safe(r_inst));
+
+  // 6) 再做一层时间平滑：r = alpha * r_inst + (1-alpha) * r_prev
   double r_prev = 0.0;
-  if (auto itPrev = m_prevRByIf.find(m_lastActionOutIf); itPrev != m_prevRByIf.end()) r_prev = itPrev->second;
-  double r = 0.4 * r_inst + 0.6 * r_prev;
+  auto itPrev = m_prevRByIf.find(m_lastActionOutIf);
+  if (itPrev != m_prevRByIf.end()) {
+    r_prev = clamp01(safe(itPrev->second));
+  }
 
-  // sanitize before logging
-  auto clamp01 = [](double x){ return std::min(1.0, std::max(0.0, x)); };
-  auto safe     = [](double x){ return std::isfinite(x) ? x : 0.0; };
-  T_win = clamp01(safe(T_win));
-  T_ema = clamp01(safe(T_ema));
-  T     = clamp01(safe(T));
-  st.qSmooth = clamp01(safe(st.qSmooth));
-  R_sw = clamp01(safe(R_sw));
-  if (R_flow >= 0.0) R_flow = clamp01(safe(R_flow));
-  r = safe(r);
+  double alpha = m_rewardAlpha; // 头文件里默认 0.7
+  if (alpha < 0.0) alpha = 0.0;
+  if (alpha > 1.0) alpha = 1.0;
+  double r = alpha * r_inst + (1.0 - alpha) * r_prev;
+  r = clamp01(safe(r));
 
-  // === 3) 把“窗口内增量”缓存到 pending：delta = r - r_prev ===
+  // 7) 为 delta 模式保留增量缓存；默认 m_useDeltaReward=false 不用
   double delta = r - r_prev;
   m_pendingDeltaByIf[m_lastActionOutIf] += delta;
   m_prevRByIf[m_lastActionOutIf] = r;
 
-  // === 4) 重置窗口累计 ===
-  st.winStartSec = now;
-  st.lastQueueSampleSec = now;
-  st.ackBytesWin = 0;
-  st.queueIntBytes = 0.0;
-  st.accTxBytes = 0;
+  // =========================
+  // 8) CSV 记录：每次 ComputeReward 调用输出一行
+  // =========================
 
-  // === 5) 日志关闭：禁用 [RW] win_close 打印，避免同步 I/O 降速 ===
-  // （保留空块以便将来恢复）
-  if (true) { // 启用周期性进度日志（降频）
-    static double lastPrint = 0.0;
-    const double printInterval = 0.00050; // 每 0.5ms 打印一次仿真进度
-    if (now - lastPrint >= printInterval) {
-      NS_LOG_UNCOND("[PROGRESS] t=" << now);
-      lastPrint = now;
-    }
+  EnsureRewardCsvOpen();
+  if (m_rewardCsvOpened) {
+    m_rewardCsv << std::fixed << std::setprecision(9)
+                << now << ","
+                << m_lastActionOutIf << ","
+                << T << ","
+                << st.qSmooth << ","
+                << R_norm << ","
+                << R_qcn << ","
+                << r_inst << ","
+                << r << ","
+                << delta << "\n";
   }
+
+  // =========================
+  // 9) 重置“本次奖励区间内”的一些计数（不再做窗口 gating）
+  // =========================
+
+  st.ackWinCtrl    = 0;
+  st.nackWinCtrl   = 0;
+  st.ackBytesWin   = 0;
+  st.queueIntBytes = 0.0;
+  st.accTxBytes    = 0;
+  st.winStartSec   = now;
+  st.lastQueueSampleSec = now;
+
+  // =========================
+  // 10) 统计次数（沿用你原来的 WinClosesPrinter）
+  // =========================
+
+  static std::unordered_map<uint32_t,uint64_t> s_winCloseCnt;
+  s_winCloseCnt[m_lastActionOutIf]++;
+
+  struct WinClosesPrinter {
+    ~WinClosesPrinter() {
+      for (auto& kv : s_winCloseCnt) {
+        NS_LOG_UNCOND("[WIN] if=" << kv.first << " closes=" << kv.second);
+      }
+      // 追加 COVER/LOOP 汇总（进程级）
+      const double cover = (S_seen > 0 ? double(S_gated) / double(S_seen) : 0.0);
+      const double loopr = ((S_back + S_fwd) > 0 ? double(S_back) / double(S_back + S_fwd) : 0.0);
+      NS_LOG_UNCOND("[COVER] seen=" << S_seen << " gated=" << S_gated
+                      << " bypass=" << S_bypass << " cover=" << cover);
+      // Flowlet 粒度覆盖情况
+      const double hold_ratio = (S_flowletNew > 0 ? double(S_gated) / double(S_flowletNew) : 0.0);
+      NS_LOG_UNCOND("[FLOWLET] new=" << S_flowletNew
+                     << " held=" << S_gated
+                     << " hold_ratio=" << hold_ratio);
+      NS_LOG_UNCOND("[LOOP] back=" << S_back << " fwd=" << S_fwd
+                      << " ratio=" << loopr);
+      NS_LOG_UNCOND("[ADH] chosen=" << S_decChosen
+                     << " match=" << S_decMatch
+                     << " mismatch=" << S_decMismatch
+                     << " ratio=" << (S_decChosen ? double(S_decMatch) / S_decChosen : 0.0)
+                     << " observed=" << (S_decChosen ? double(S_decMatch + S_decMismatch) / S_decChosen : 0.0));
+
+      NS_LOG_UNCOND("[LOOP-LONG] sample=" << S_longLoopSample
+                     << " hit=" << S_longLoopHit
+                     << " ratio=" << (S_longLoopSample ? double(S_longLoopHit) / S_longLoopSample : 0.0));
+
+      // 字节加权版本，便于对齐不同大小包的影响
+      const uint64_t obsBytes = S_decMatchBytes + S_decMismatchBytes;
+      const double adh_bytes_ratio = (obsBytes ? double(S_decMatchBytes) / double(obsBytes) : 0.0);
+      NS_LOG_UNCOND("[ADH-B] match_bytes=" << S_decMatchBytes
+                     << " mismatch_bytes=" << S_decMismatchBytes
+                     << " ratio=" << adh_bytes_ratio);
+      
+      // NEW: 打印按端口的 dupACK/NACK 统计 (按流聚合+三分支)
+      NS_LOG_UNCOND("--- Per-Port DUP/NACK Stats (Flow-Aggregated, Backstep-as-DUP) ---");
+      for (const auto& kv : S_dupByIf) {
+        const auto& st2 = kv.second;
+        if (st2.total_ctrl == 0) continue;
+        const double ack_backstep_ratio    = st2.ack_total ? double(st2.backstep_cnt) / st2.ack_total : 0.0;
+        const double ack_repeat_per_adv    = (st2.advance_cnt ? double(st2.repeat_total) / st2.advance_cnt : 0.0);
+        const double nack_ratio            = double(st2.nack_total) / st2.total_ctrl;
+
+        NS_LOG_UNCOND("[DUPACK] if=" << kv.first
+                       << " backstep_ratio=" << ack_backstep_ratio
+                       << " repeat_per_adv=" << ack_repeat_per_adv
+                       << " nack_ratio=" << nack_ratio
+                       << " backsteps=" << st2.backstep_cnt
+                       << " repeats=" << st2.repeat_total
+                       << " advances=" << st2.advance_cnt
+                       << " total_ack=" << st2.ack_total
+                       << " nack=" << st2.nack_total
+                       << " max_streak_repeat=" << st2.max_streak);
+      }
+    }
+  };
+  static WinClosesPrinter printer;
+
   return r;
 }
+
 
 void
 ConweaveObsManager::ReportAckOnIngress(Ptr<const Packet> p)
@@ -367,6 +940,12 @@ ConweaveObsManager::ReportAckOnIngress(Ptr<const Packet> p)
   Ptr<Packet> pc = p->Copy();
   CustomHeader ch(CustomHeader::L2_Header | CustomHeader::L3_Header | CustomHeader::L4_Header);
   pc->PeekHeader(ch);
+
+  // 正确的 ACK/NACK 判定与确认号
+  const bool is_ack  = (ch.l3Prot == 0xFC);
+  const bool is_nack = (ch.l3Prot == 0xFD);
+  if (!is_ack && !is_nack) return; // 非确认报文，直接忽略
+  uint32_t ack_seq   = ch.ack.seq;      // qbbHeader 里的确认号
 
   uint64_t flowKey = 0;
   // Use UDP/TCP 4-tuple if available, otherwise fallback to sip/dip alone
@@ -395,8 +974,52 @@ ConweaveObsManager::ReportAckOnIngress(Ptr<const Packet> p)
     //NS_LOG_UNCOND("[ACK] miss key=" << flowKey << " (no outIf)");
     return;
   }
+
+  // ==== NEW: 按端口统计 dupACK/NACK (按流聚合) ====
+  double now = Simulator::Now().GetSeconds();
+  {
+    std::lock_guard<std::mutex> lock(S_dupMutex);
+    auto& st = S_dupByIf[outIf];
+    st.total_ctrl++;
+    if(is_ack) st.ack_total++; else st.nack_total++;
+
+    // TTL/LRU, a simple version to control memory
+    const double kFlowSeqTtl = 0.1; // 100ms
+    if (st.flow_seq.size() > 10000) {
+        for (auto it = st.flow_seq.begin(); it != st.flow_seq.end(); ) {
+            if (now - it->second.ts > kFlowSeqTtl) {
+                it = st.flow_seq.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    auto &fs = st.flow_seq[flowKey];
+    
+    if (ack_seq > fs.last_seq) {
+      st.advance_cnt++;
+      fs.last_seq = ack_seq;
+      fs.streak = 0;
+    } else if (ack_seq != 0 && ack_seq == fs.last_seq) {
+      st.repeat_total++;
+      fs.streak++;
+      st.max_streak = std::max<uint64_t>(st.max_streak, fs.streak);
+    } else if (ack_seq < fs.last_seq) { // ack_seq < fs.last_seq  => 真正的乱序/回退
+      st.backstep_cnt++;
+      st.backstep_bytes += (uint64_t)(fs.last_seq - ack_seq);
+      fs.streak = 0;
+      // 不更新 fs.last_seq，保持“最近前进”的基准
+    }
+    fs.ts = now;
+  }
+
   if (m_portStats.find(outIf) == m_portStats.end()) m_portStats[outIf] = EgressPortStats();
   auto &st = m_portStats[outIf];
+  
+  if (is_ack)  { st.ackWinCtrl++; }   // 窗内 ACK 计数
+  if (is_nack) { st.nackWinCtrl++; }  // 窗内 NACK 计数
+
   auto &awin = m_ackWins[outIf];
   // Per-flow stats record
   auto &fst = m_flowStats[flowKey];
@@ -406,30 +1029,20 @@ ConweaveObsManager::ReportAckOnIngress(Ptr<const Packet> p)
   awin.acks += 1;
   fst.ackCount += 1;
 
-  // Dup/ACK detection: prefer tcp.ack if present
-  uint64_t ackNo = 0;
-  if (ch.tcp.ack) ackNo = ch.tcp.ack;
-  else if (ch.udp.seq) ackNo = ch.udp.seq; // fallback
-
+  // Dup/ACK detection: 使用修正后的 ack_seq 和 backstep-only 逻辑
   uint64_t deltaBytes = 0;
-  double now = Simulator::Now().GetSeconds();
-  if (ackNo != 0) {
-    if (awin.lastAckNo == ackNo) {
+  if (ack_seq != 0) {
+    if (ack_seq > awin.lastAckNo) {
+      deltaBytes = ack_seq - awin.lastAckNo;    // 前进
+      awin.lastAckNo = ack_seq;
+      fst.lastAckNo  = ack_seq;
+    } else if (ack_seq < awin.lastAckNo) { // ack_seq < last
+      // backstep：这才计入 dupacks -> emaDup
       awin.dupacks += 1;
       fst.dupAckCount += 1;
-    } else {
-      // sequence wrap/ordering safe diff: only count positive advancement
-      if (ackNo > awin.lastAckNo) {
-        deltaBytes = ackNo - awin.lastAckNo;
-      } else {
-        // ackNo <= lastAckNo -> treat as dup/ordering
-        awin.dupacks += 1;
-        fst.dupAckCount += 1;
-        deltaBytes = 0;
-      }
-      awin.lastAckNo = ackNo;
-      fst.lastAckNo = ackNo;
+      // 不更新 lastAckNo
     }
+    // case: ack_seq == awin.lastAckNo (repeat) -> 不做任何事
   }
 
   if (deltaBytes > 0) {
@@ -444,12 +1057,24 @@ ConweaveObsManager::ReportAckOnIngress(Ptr<const Packet> p)
     // 调稳：ACK 吞吐 EMA 放慢，降低抖动
     double beta = 0.05;
     awin.emaGoodput = (1.0 - beta) * awin.emaGoodput + beta * goodput_bps;
+
+    //per-flow throughput EMA
+    double dtFlow = (fst.lastAckTs > 0.0)
+                  ? (now - fst.lastAckTs)
+                  : m_rewardWinSec;
+    if (dtFlow < 5e-6) dtFlow = 5e-6;
+    double flow_bps = (double)deltaBytes * 8.0 / dtFlow;
+
+    const double alpha = 0.05;
+    fst.emaBps = (1.0 - alpha) * fst.emaBps + alpha * flow_bps;
+    fst.lastAckTs = now;
+
     awin.lastAckTs = now;
     
   // 关闭 ACK 打印，避免大量 I/O
   if (false) {
     static uint64_t ackPrint = 0; (void)ackPrint;
-    NS_LOG_UNCOND("[ACK] outIf=" << outIf << " key=" << flowKey << " ack=" << ackNo
+    NS_LOG_UNCOND("[ACK] outIf=" << outIf << " key=" << flowKey << " ack=" << ack_seq
                    << " dbytes=" << deltaBytes << " dt=" << dt << " bps=" << goodput_bps << " ema=" << awin.emaGoodput);
   }
   }
@@ -546,8 +1171,8 @@ ConweaveObsManager::Configure(Ptr<SwitchNode> sw,
     (void)m_ackWins[outIf];
   }
 
-  // Set adaptive TTL
-  m_flowMapTtlSec = std::max(5e-4, 200.0 * std::max(m_rttGuessSec, m_rewardWinSec));
+  // m_flowMapTtlSec = std::max(5e-4, 200.0 * std::max(m_rttGuessSec, m_rewardWinSec)); // Temporarily disable adaptive TTL
+  m_flowMapTtlSec = 5e-4; // Set to a fixed 500us
   NS_LOG_UNCOND("[Config] Set adaptive flowMapTtlSec to " << m_flowMapTtlSec * 1000 << " ms");
 
   m_ready = true;
@@ -566,7 +1191,7 @@ ConweaveObsManager::GetActionSpace() const
 Ptr<OpenGymSpace>
 ConweaveObsManager::GetObservationSpace() const
 {
-  uint32_t dim = 1u + (uint32_t)m_overlayNeighbors.size();
+  uint32_t dim = 1u + (uint32_t)m_overlayNeighbors.size() * kFeatsPerEgress;
   double high = std::max(1.0, m_upperBound);
   return CreateObject<OpenGymBoxSpace>(0.0, high, std::vector<uint32_t>{dim}, TypeNameGet<float>());
 }
@@ -592,31 +1217,34 @@ ConweaveObsManager::ResolveEgressIfToNeighbor(uint32_t neighborNodeId) const
   return 0; // not found
 }
 
-// 构造观测：[dstOverlay] + [每邻居端口的队列字节数]
+// 构造观测：[dstOverlay] + 每邻居出口5维（cost_bytes, ce_local, ce_remote_min, age, cov）
 std::vector<float>
 ConweaveObsManager::BuildObservation(int currentDstOverlay) const
 {
   std::vector<float> out;
-  out.reserve(1 + m_egressIfs.size());
+  out.reserve(1 + m_egressIfs.size() * kFeatsPerEgress);
 
   // [0] 放目的 overlay id（你之前约定好的）
   out.push_back(static_cast<float>(currentDstOverlay));
 
   if (!m_ready) {
-    // 若未 ready，邻居部分填 0
-    for (size_t k = 0; k < m_overlayNeighbors.size(); ++k) out.push_back(0.0f);
+    // 若未 ready，邻居部分按 5 维填 0
+    for (size_t k = 0; k < m_overlayNeighbors.size() * kFeatsPerEgress; ++k) out.push_back(0.0f);
     return out;
   }
 
-  // 按照 overlayNeighbors 顺序，对齐取 ifIndex 对应端口的总队列字节数
+  // 按照 overlayNeighbors 顺序，构造 5 维：cost=本地队列字节，其余置 0（兜底）
   for (uint32_t ifx : m_egressIfs) {
     float qbytes = 0.0f;
     auto dev = DynamicCast<QbbNetDevice>(m_sw->GetDevice(ifx));
     if (dev && dev->GetQueue()) {
       qbytes = static_cast<float>(dev->GetQueue()->GetNBytesTotal());
     }
-    out.push_back(qbytes);
-    
+    out.push_back(qbytes);   // cost_bytes
+    out.push_back(0.0f);     // ce_local
+    out.push_back(0.0f);     // ce_remote_min
+    out.push_back(0.0f);     // age
+    out.push_back(0.0f);     // cov
   }
   return out;
 }
@@ -624,16 +1252,44 @@ ConweaveObsManager::BuildObservation(int currentDstOverlay) const
 float
 ConweaveObsManager::GetReward()
 {
-  // 先尝试结算一次窗口（若未到触发条件，ComputeReward 会立即返回且不改状态）
   (void)ComputeReward();
 
-  // 改为：按 Agent 聚合发放 reward —— 汇总并清零所有端口的 pending 增量
-  double reward = 0.0;
-  for (auto &kv : m_pendingDeltaByIf) {
-    reward += kv.second;
-    kv.second = 0.0; // 清零，避免重复累计
+  if (m_useDeltaReward) {
+    // 模式1：按 Agent 聚合发放 reward —— 汇总并清零所有端口的 pending 增量
+    double reward = 0.0;
+    for (auto &kv : m_pendingDeltaByIf) {
+      reward += kv.second;
+      kv.second = 0.0; // 清零，避免重复累计
+    }
+    return static_cast<float>(reward);
+  } else {
+    // 模式2（默认）：返回水平值 r
+    // 1) 优先返回“上一拍动作端口”的水平值 r
+    if (m_lastActionOutIf != 0) {
+      auto it = m_prevRByIf.find(m_lastActionOutIf);
+      if (it != m_prevRByIf.end()) {
+        double r_level = it->second;
+        if (!std::isfinite(r_level)) r_level = 0.0;
+        r_level = std::min(1.0, std::max(0.0, r_level));
+        return static_cast<float>(r_level);
+      }
+    }
+    // 2) 若不可用（冷启动等），回退到全端口（带宽加权）平均
+    double sum = 0.0, wsum = 0.0;
+    for (const auto &kv : m_prevRByIf) {
+      uint32_t ifx = kv.first;
+      double r_prev = kv.second;
+      double w = 1.0;
+      auto itps = m_portStats.find(ifx);
+      if (itps != m_portStats.end() && itps->second.bwBps > 0) w = itps->second.bwBps; // 带宽加权（更稳）
+      sum  += w * r_prev;
+      wsum += w;
+    }
+    double r_level = (wsum > 0.0 ? sum / wsum : 0.0);
+    if (!std::isfinite(r_level)) r_level = 0.0;
+    r_level = std::min(1.0, std::max(0.0, r_level));
+    return static_cast<float>(r_level);
   }
-  return static_cast<float>(reward);
 }
 
 bool
@@ -674,9 +1330,21 @@ ConweaveObsManager::ApplyAction(uint32_t actionId, int dstOverlay)
 
   /* 3.2 选出口 */
   const uint32_t outIf = (actionId < m_egressIfs.size() ? m_egressIfs[actionId] : 0);
-  if (outIf == 0) { m_busy = false; return true; }
+  if (outIf == 0) { m_busy = false; m_flowletKeyHeld = 0; return true; }
+
+  if (m_pktUidHeld != 0) {
+    m_decisionByUid[m_pktUidHeld] = outIf;
+    m_decChosen++;
+    S_decChosen++;
+  }
 
   /* 3.3 直接放行：调用 SwitchNode 的 RlRelease */
+  // H4: 判断是否“打回头路”
+  if (m_lastInIf != 0 && outIf == m_lastInIf) {
+      m_backHop++; S_back++;
+  } else {
+      m_fwdHop++; S_fwd++;
+  }
   // attribute last action to this outIf for reward accounting
   m_lastActionOutIf = outIf;
   // map flow -> outIf so later ACKs can be attributed deterministically
@@ -703,7 +1371,23 @@ ConweaveObsManager::ApplyAction(uint32_t actionId, int dstOverlay)
   } catch(...) {
     // ignore if header malformed
   }
-  m_swHeld->RlRelease(outIf);
+  // 写回 flowlet 粘性与反抖
+  if (m_flowletKeyHeld != 0) {
+    auto itf = m_flowlets.find(m_flowletKeyHeld);
+    if (itf != m_flowlets.end()) {
+      auto &ctx = itf->second;
+      ctx.lastActionOutIf = outIf;
+      ctx.awaitingAction  = false;
+      ctx.lockedUntilSec  = 0.0; // no dwell lock
+    }
+  }
+
+  auto itTor2 = m_indexToSwitch.find(dstOverlay);
+  if (itTor2 != m_indexToSwitch.end()) {
+    uint32_t dstToR = itTor2->second;
+    m_swHeld->SetRlPreferredOutIf(dstToR, outIf);  // 告诉路由逻辑优先走这个口
+  }
+  m_swHeld->RlRelease(m_pktHeld, m_chHeld, outIf);
 
   // Verbose-only: action trace disabled by default
   // NS_LOG_UNCOND("[Action] t=" << Simulator::Now().GetSeconds()
@@ -718,6 +1402,7 @@ ConweaveObsManager::ApplyAction(uint32_t actionId, int dstOverlay)
   m_swHeld      = nullptr;
   m_pktHeld     = nullptr;
   m_pktUidHeld  = 0;
+  m_flowletKeyHeld = 0;
   ClearCurrentPacketContext();
   ResetPreparedObservation();
   // NS_LOG_UNCOND("[RL] snapshot reset after action");
@@ -732,20 +1417,28 @@ ConweaveObsManager::ResetPreparedObservation()
   m_lastPktId = 0;
   m_lastPktSize = 0;
   m_hasPrepared = false;
+  m_flowletKeyHeld = 0;
 }
 
 //9.11新增
 void
 ConweaveObsManager::OnDelivered(uint64_t uid, double /*nowSec*/)
 {
-  // 最小实现：只产生“交付事件脉冲”并累计全局计数；
-  // 注入计数在无损场景下与交付等同（避免 Python 端 injected=0 导致除零）
+  // 产生“交付事件脉冲”，并基于首见时间计算 e2e
   m_eventDelivered = true;
-  m_eventDelaySec = 0.0; // 如需 e2e 延迟，后续在源 ToR 记录首见时间再计算
+  double now = Simulator::Now().GetSeconds();
+  double d = 0.0;
+  auto it = m_firstSeenSec.find(uid);
+  if (it != m_firstSeenSec.end()) {
+    d = std::max(0.0, now - it->second);
+    m_firstSeenSec.erase(it);
+  }
+  m_lastDeliveredDelaySec = d;
+  m_eventDelaySec = d;
+  m_sumE2E += d;
   m_globalDelivered += 1;
-  m_globalInjected  += 1;
-  // 如需 drop：在 ReportPacketDrop 里累计 m_globalDropped
-  (void)uid;
+  m_seen.erase(uid);
+  m_stepDelivered += 1;
 }
 
 bool
@@ -776,4 +1469,13 @@ ConweaveObsManager::DrainLostPacketsSemicolon()
   return s;
 }
 
+ConweaveObsManager::~ConweaveObsManager()
+{
+  if (m_rewardCsvOpened) {
+    m_rewardCsv.close();
+  }
+  // 类析构中不再打印，以免与进程级静态打印重复/被吞
+}
+
 } // namespace ns3
+

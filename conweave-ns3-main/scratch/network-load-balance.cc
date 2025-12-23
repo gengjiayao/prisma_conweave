@@ -197,7 +197,7 @@ static vector<vector<bool>> ReadNxMatrix(string adj_mat_file_name)
 }
 
 /*------Load balancing parameters-----*/
-// mode for load balancer, 0: flow ECMP, 2: DRILL, 3: Conga, 6: Letflow, 9: ConWeave
+// mode for load balancer, 0: flow ECMP, 2: DRILL, 3: Conga, 6: Letflow, 7:RL, 9: ConWeave
 uint32_t lb_mode = 0;
 
 // Conga params (based on paper recommendation)
@@ -532,6 +532,21 @@ void periodic_monitoring(FILE *fout_voq, FILE *fout_voq_detail, FILE *fout_uplin
                             fout_voq_detail, fout_uplink, fout_conn, lb_mode);  // every 10us
     }
     return;
+}
+
+/**
+ * @brief 仿真“心跳”日志：每 1ms 仿真时间打印一次，便于在 config.log 观察进度（仅非RL模式）。
+ */
+static const Time kHeartbeatInterval = MilliSeconds(1);
+void PrintSimHeartbeat() {
+    // 非RL模式才输出心跳
+    if (lb_mode != 7) {
+        NS_LOG_UNCOND("[Heartbeat] sim_t=" << Simulator::Now().GetSeconds() << "s running...");
+    }
+    // 在仿真结束时间之前循环调度
+    if (Simulator::Now() < Seconds(flowgen_stop_time + simulator_extra_time)) {
+        Simulator::Schedule(kHeartbeatInterval, &PrintSimHeartbeat);
+    }
 }
 
 /**
@@ -1592,7 +1607,7 @@ int main(int argc, char *argv[]) {
 
     // manually type BDP
     std::map<std::string, uint32_t> topo2bdpMap;
-    topo2bdpMap[std::string("leaf_spine_128_100G_OS2")] = 104000;  // RTT=8320
+    topo2bdpMap[std::string("leaf_spine_128_100G_OS2")] = 5000;  // RTT=8320
     topo2bdpMap[std::string("fat_k8_100G_OS2")] = 156000;      // RTT=12480 --> all 100G links
 
     // topology_file
@@ -1696,6 +1711,7 @@ int main(int argc, char *argv[]) {
     /**
      * @brief get BDP and delay
      */
+    //遍历所有的主机对，用预先计算好的传播延迟delay和发送延迟txdelay
     maxRtt = maxBdp = 0;
     fprintf(stderr, "node_num=%d\n", node_num);
     for (uint32_t i = 0; i < node_num; i++) {
@@ -1704,19 +1720,19 @@ int main(int argc, char *argv[]) {
             if (n.Get(j)->GetNodeType() != 0) continue;
             uint64_t delay = pairDelay[n.Get(i)][n.Get(j)];
             uint64_t txDelay = pairTxDelay[n.Get(i)][n.Get(j)];
-            uint64_t rtt = delay * 2 + txDelay;
+            uint64_t rtt = delay * 2 + txDelay; //算法
             uint64_t bw = pairBw[n.Get(i)][n.Get(j)];
             uint64_t bdp = rtt * bw / 1000000000 / 8;
             pairBdp[n.Get(i)][n.Get(j)] = bdp;
             pairBdp[n.Get(j)][n.Get(i)] = bdp;
-            pairRtt[n.Get(i)][n.Get(j)] = rtt;
+            pairRtt[n.Get(i)][n.Get(j)] = rtt;//成对保存rtt
             pairRtt[n.Get(j)][n.Get(i)] = rtt;
 
             if (bdp > maxBdp) maxBdp = bdp;
-            if (rtt > maxRtt) maxRtt = rtt;
+            if (rtt > maxRtt) maxRtt = rtt; //维护最大值
         }
     }
-    fprintf(stderr, "maxRtt: %lu, maxBdp: %lu\n", maxRtt, maxBdp);
+    fprintf(stderr, "maxRtt: %lu, maxBdp: %lu\n", maxRtt, maxBdp); //输出到config里
     assert(maxBdp == irn_bdp_lookup);
 
     std::cout << "Configuring switches" << std::endl;
@@ -2117,6 +2133,8 @@ int main(int argc, char *argv[]) {
     NS_LOG_INFO("Run Simulation.");
     Simulator::Schedule(Seconds(flowgen_start_time),
                         &stop_simulation_middle);  // check every 100us
+    // 从流量生成开始时刻起，按 1ms 仿真时间输出心跳（仅非RL模式）
+    Simulator::Schedule(Seconds(flowgen_start_time), &PrintSimHeartbeat);
     Simulator::Stop(Seconds(flowgen_stop_time + 0.1));
     Simulator::Run();
     if (fct_output) { fclose(fct_output); fct_output = NULL; }

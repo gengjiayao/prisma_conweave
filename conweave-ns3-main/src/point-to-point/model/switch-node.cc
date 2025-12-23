@@ -16,68 +16,103 @@
 #include "ns3/conweave-obs-manager.h" 
 #include "ppp-header.h"
 #include "qbb-net-device.h"
+#include <atomic>
+#include <chrono>
 
 
 NS_LOG_COMPONENT_DEFINE("SwitchNode");
 
+namespace {
+  // RL拦截在交换机侧的统计（进程级聚合）
+  std::atomic<uint64_t> S_rlSeen{0};         // 满足候选条件、尝试拦截的包（非控制、非目的ToR）
+  std::atomic<uint64_t> S_rlHeld{0};         // 实际被挂起并请求动作
+  std::atomic<uint64_t> S_rlBusySkip{0};     // 因 m_rlBusy 放行
+  std::atomic<uint64_t> S_rlCtrlSkip{0};     // 因控制报文放行
+  std::atomic<uint64_t> S_rlDstTorSkip{0};   // 因为到本ToR（下行）放行
+  std::atomic<uint64_t> S_rlTimeoutFallback{0}; // 因动作超时回退（ECMP 放行）
+
+  // 非 RL 模式：记录整次仿真的墙钟耗时（进程级一次性）
+  struct WallClockTimer {
+    std::chrono::steady_clock::time_point t0;
+    WallClockTimer() : t0(std::chrono::steady_clock::now()) {}
+    ~WallClockTimer() {
+      // 仅在“全局 lb_mode != 7 (RL 覆写)”时打印
+      if (ns3::Settings::lb_mode != 7) {
+        auto t1 = std::chrono::steady_clock::now();
+        double sec = std::chrono::duration_cast<std::chrono::duration<double>>(t1 - t0).count();
+        NS_LOG_UNCOND("[RUNTIME] lb_mode=" << ns3::Settings::lb_mode << " wall_clock_sec=" << sec);
+      }
+    }
+  } s_wallClockTimer;
+
+  struct RlSwitchPrinter {
+    ~RlSwitchPrinter() {
+      const double seen = static_cast<double>(S_rlSeen.load());
+      const double held = static_cast<double>(S_rlHeld.load());
+      const double busy = static_cast<double>(S_rlBusySkip.load());
+      const double ctrl = static_cast<double>(S_rlCtrlSkip.load());
+      const double dst  = static_cast<double>(S_rlDstTorSkip.load());
+      const double tofb = static_cast<double>(S_rlTimeoutFallback.load());
+      const double hold_ratio = (seen > 0.0 ? held / seen : 0.0);
+      const double busy_rate  = (seen > 0.0 ? busy / seen : 0.0);
+      NS_LOG_UNCOND("[RL-SW] seen=" << (uint64_t)seen
+                     << " held=" << (uint64_t)held
+                     << " busy_skip=" << (uint64_t)busy
+                     << " ctrl_skip=" << (uint64_t)ctrl
+                     << " dsttor_skip=" << (uint64_t)dst
+                     << " timeout_fb=" << (uint64_t)tofb
+                     << " hold_ratio=" << hold_ratio
+                     << " busy_rate=" << busy_rate);
+    }
+  } s_rlSwitchPrinter;
+}
+
 namespace ns3 {
 
 /* ****************  RL per-hop hold & release  **************** */
-bool
-SwitchNode::RlMaybeHold(Ptr<NetDevice> inDev, Ptr<Packet> p, CustomHeader &ch)
+
+// -- 静态函数实现 --
+void
+SwitchNode::IncrementRlHeld() { S_rlHeld++; }
+
+void
+SwitchNode::IncrementRlBusySkip() { S_rlBusySkip++; }
+
+
+void
+SwitchNode::RlHandover(Ptr<NetDevice> inDev, Ptr<Packet> p, CustomHeader &ch)
 {
-    // 1. 控制包直接放行
+    // 1. 重新加入过滤逻辑：控制包直接放行，不计入RL统计
     const bool control_pkt = (ch.l3Prot == 0xFF || ch.l3Prot == 0xFE ||
                               ch.l3Prot == 0xFD || ch.l3Prot == 0xFC);
-    if (control_pkt) return false;
+    if (control_pkt) { S_rlCtrlSkip++; SendToDev(p, ch); return; }
 
-    // 1.5 目的 ToR：直接下发到主机，不做 RL 挂起（避免回流/重复计数）
+    // 2. 重新加入过滤逻辑：目的 ToR的包直接下发，不计入RL统计
     if (m_isToR && m_isToR_hostIP.find(ch.dip) != m_isToR_hostIP.end()) {
-        return false;
+        S_rlDstTorSkip++;
+        SendToDev(p, ch);
+        return;
     }
 
-    // 2. 忙或没绑定 ObsManager 也放行
-    if (m_rlBusy || !m_rlMgr) return false;
+    // 3. 统计进入候选的包（到此已排除控制与目的ToR）
+    S_rlSeen++;
+
+    if (!m_rlMgr) { SendToDev(p, ch); return; }
     Ptr<ConweaveObsManager> mgr = DynamicCast<ConweaveObsManager>(m_rlMgr);
-    if (!mgr || !mgr->Ready()) return false; // 未就绪则不拦包
+    if (!mgr || !mgr->Ready()) { SendToDev(p, ch); return; }
 
-    // 3. 挂起当前包
-    FlowIdTag t;
-    p->PeekPacketTag(t);
-    m_rlHeld.p     = p;
-    m_rlHeld.ch    = ch;
-    m_rlHeld.inDev = t.GetFlowId();
-    m_rlHeld.valid = true;
-    m_rlBusy       = true;
-
-    // 【诊断】首次RL挂起（中文一次性打印）
-    {
-        static bool s_printed = false;
-        if (!s_printed) {
-            NS_LOG_UNCOND("【RL挂起】首次触发 uid=" << p->GetUid() << " sw=" << GetId());
-            s_printed = true;
-        }
-    }
-
-    // 4. 通知 ObsManager → 触发 Notify → Python
-    //m_rlMgr->OnPerHopPacket(this, inDev, p, ch);
+    // 4. 将包交给 Manager 处理，由其内部 Flowlet 逻辑决定是否挂起
+    // Manager会负责调用 SendToDev 或 RlRelease
     mgr->OnPerHopPacket(this, inDev, p, ch);
-    // 启动兜底超时（若 Python 动作未回，回落 ECMP 释放）
-    if (m_rlTimeoutEv.IsRunning()) m_rlTimeoutEv.Cancel();
-    m_rlTimeoutEv = Simulator::Schedule(MicroSeconds(m_rlTimeoutUs),
-                                        &SwitchNode::RlTimeoutFallback, this);
-    return true;   // 已挂起，上层别再转发
 }
 
 void
-SwitchNode::RlRelease(uint32_t outIf)
+SwitchNode::RlRelease(Ptr<Packet> p, CustomHeader& ch, uint32_t outIf)
 {
     if (m_rlTimeoutEv.IsRunning()) m_rlTimeoutEv.Cancel();
-    if (!m_rlBusy || !m_rlHeld.valid) return;
 
     // 选队列优先级（完全复用原有逻辑）
     uint32_t qIndex;
-    const CustomHeader &ch = m_rlHeld.ch;
     if (ch.l3Prot == 0xFF || ch.l3Prot == 0xFE ||
         (m_ackHighPrio && (ch.l3Prot == 0xFD || ch.l3Prot == 0xFC))) {
         qIndex = 0;
@@ -85,12 +120,8 @@ SwitchNode::RlRelease(uint32_t outIf)
         qIndex = (ch.l3Prot == 0x06 ? 1 : ch.udp.pg);
     }
 
-    // 用同一份包从指定端口发出
-    DoSwitchSend(m_rlHeld.p, m_rlHeld.ch, outIf, qIndex);
-
-    // 清理
-    m_rlHeld.valid = false;
-    m_rlBusy       = false;
+    // 用传入的包从指定端口发出
+    DoSwitchSend(p, ch, outIf, qIndex);
 
     // 【诊断】首次RL释放（中文一次性打印）
     {
@@ -102,19 +133,19 @@ SwitchNode::RlRelease(uint32_t outIf)
     }
 }
 
+
 void
 SwitchNode::RlTimeoutFallback()
 {
-    if (!m_rlBusy || !m_rlHeld.valid) return; // 已被动作释放
-    auto entry = m_rtTable.find(m_rlHeld.ch.dip);
-    if (entry == m_rtTable.end() || entry->second.empty()) {
-        // 找不到路由则清理挂起，避免永久卡死
-        m_rlHeld.valid = false;
-        m_rlBusy = false;
-        return;
+    // 这个函数的逻辑也需要重写，因为它依赖 m_rlHeld
+    // 超时也应该通知 Manager，由 Manager 来决定如何处理
+    if (!m_rlMgr) return;
+    Ptr<ConweaveObsManager> mgr = DynamicCast<ConweaveObsManager>(m_rlMgr);
+    if (mgr) {
+        // 我们需要在 ConweaveObsManager 中添加一个处理超时的函数
+        // mgr->OnRlTimeout();
     }
-    uint32_t outIf = DoLbFlowECMP(m_rlHeld.p, m_rlHeld.ch, entry->second);
-    RlRelease(outIf);
+    // S_rlTimeoutFallback++; // 统计移到 Manager
 }
 /* ************************************************************* */
 
@@ -334,10 +365,11 @@ bool SwitchNode::SwitchReceiveFromDevice(Ptr<NetDevice> device, Ptr<Packet> pack
     // === RL 每跳拦截 ===
     uint32_t lbModeLocal = (m_lbMode == 0) ? Settings::lb_mode : m_lbMode;
     if (lbModeLocal == 7 && m_rlMgr) {
-    if (RlMaybeHold(device, packet, ch)) {
-      NS_LOG_LOGIC("[RL] held pkt uid=" << packet->GetUid() << " on sw " << GetId());
-      return true; // 本包已被 RL 挂起，等待动作
-        }
+        // 直接将包交给RL管理器处理。
+        // Manager内部的Flowlet逻辑会决定是立即使用缓存转发，还是挂起等待Python决策。
+        // 不再需要返回值，因为Manager接管了包的生命周期。
+        RlHandover(device, packet, ch);
+        return true; // Manager会负责后续处理（转发或丢弃），所以这里直接返回
     } 
 
 

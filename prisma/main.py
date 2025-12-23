@@ -101,6 +101,24 @@ def main():
     
     ## setup the agents (fix the static variables)
     Agent.init_static_vars(params)
+
+    # 追加：全局 reward 参数与 writer（测试模式安全：writer=None，log_every=0）
+    is_train = int(params.get("train", 1)) == 1
+
+    # 统一的全局 reward 写入参数
+    Agent.reward_ewma_alpha = 0.05
+    Agent.reward_log_every  = 10 if is_train else 0
+    Agent.global_reward_ewma = 0.0
+
+    # 全局曲线 writer（训练时创建，测试为 None）
+    Agent.reward_global_by_steps_writer = (
+        tf.summary.create_file_writer(f"{params['logs_folder']}/reward_global/by_steps")
+        if is_train else None
+    )
+    Agent.reward_global_by_time_writer = (
+        tf.summary.create_file_writer(f"{params['logs_folder']}/reward_global/by_time")
+        if is_train else None
+    )
     
     ## start the profiler
     if params["profile_session"]:
@@ -142,7 +160,7 @@ def main():
                     leaf_switch_ids.add(switch_id)
 
         swid2idx = {v: k for k, v in idx2swid.items()}
-        enabled_nodes = sorted([swid2idx[sid] for sid in leaf_switch_ids if sid in swid2idx])
+        enabled_nodes = sorted([swid2idx[sid] for sid in leaf_switch_ids if sid in swid2idx]) #只保留leaf过滤掉spine
         print("Total nodes in G:", len(params["G"].nodes()))
         print("Enabled leaf agent overlay indices:", enabled_nodes)
         return enabled_nodes
@@ -207,7 +225,8 @@ def main():
         ## wait until simulation complete and update info about the env at each timestep (基于线程存活)
         def _any_alive(lst):
             return any(t.is_alive() for t in lst)
-        while _any_alive(forwarder_threads) or (params["train"] and _any_alive(trainer_threads)):
+        # Only wait for forwarder threads; trainer threads are daemonized and should not block shutdown
+        while _any_alive(forwarder_threads):
             sleep(params["logging_timestep"])
             if params["train"] == 1:
                 stats_writer_train(summary_writer_session, summary_writer_nb_arrived_pkts, summary_writer_nb_lost_pkts, summary_writer_nb_new_pkts, Agent)
@@ -249,7 +268,7 @@ def main():
 
     ## save models        
     #if params["save_models"] and Agent.curr_time >= params["simTime"]-5:
-    if params["save_models"] and Agent.curr_time > 0:
+    if params["save_models"] and (Agent.curr_time > 0 or Agent.nb_transitions > 0):
         save_all_models(Agent.agents, list(forwarders.keys()), params["session_name"], 1, 1, root=params["logs_parent_folder"] + "/saved_models/", snapshot=False)
 
     ## save the profiler results
@@ -275,10 +294,39 @@ if __name__ == '__main__':
         with open("examples/error.log", "a") as f:
             traceback.print_exc(file=f)
     finally:
-        print("kill process group")
-        if ns3_pid:
-            os.system(command=f"kill -9 {ns3_pid}")
-        if tb_process:
-            os.system(command=f"kill -9 {tb_process}")
-        SystemExit(0)
-        # os.killpg(0, signal.SIGKILL)
+        print("graceful shutdown ...")
+        # 1) 先发送 ns-3 关闭指令（ZMQ Close），给析构打印留机会
+        try:
+            from source.agent import Agent
+            for env in getattr(Agent, "envs", {}).values():
+                if env is None: continue
+                try:
+                    env.ns3ZmqBridge.send_close_command()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # 2) 给 ns-3 一点时间把 stop 消息处理完并运行析构
+        sleep(2.0)
+
+        # 3) 尝试温和结束外部进程（先 SIGTERM，再兜底 SIGKILL）
+        try:
+            if ns3_pid:
+                try:
+                    os.kill(int(ns3_pid), signal.SIGTERM)  # 让 ns-3 有机会 flush 日志与析构
+                except Exception:
+                    pass
+                sleep(1.0)
+                # 可选：若你有 wait 句柄，用 wait() 更好；这里只做兜底
+        except Exception:
+            pass
+
+        try:
+            if tb_process:
+                try:
+                    os.kill(int(tb_process), signal.SIGTERM)
+                except Exception:
+                    pass
+        except Exception:
+            pass

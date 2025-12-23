@@ -112,6 +112,20 @@ class CongaRouting : public Object {
     uint32_t GetBestPath(uint32_t dstTorId, uint32_t nSample);
     virtual void DoDispose();
 
+   /* ===== One-hop lookahead metrics (normalized 0..1) ===== */
+   struct OneHopMetrics {
+       double ce_local_norm{0.0};       // local CE normalized [0,1]
+       double ce_remote_min_norm{1.0};  // min remote CE among paths under outPort [0,1]
+       double age_norm{1.0};            // freshness of remote feedback [0=new,1=old]
+       double cov_norm{0.0};            // coverage: fraction of paths with feedback [0,1]
+       double score{0.0};               // fused score (smaller is better) [0,1]
+   };
+   bool GetOneHopMetrics(uint32_t dstToRId, uint32_t outPort, OneHopMetrics* m) const;
+   static double w_conga;  // weight for max(local, remote_min)
+   static double w_local;  // weight for local CE
+   static double w_age;    // weight for age (penalize old)
+   static double w_cov;    // weight for (1 - coverage)
+
     /* SET functions */
     void SetConstants(Time dreTime, Time agingTime, Time flowletTimeout, uint32_t quantizeBit, double alpha);
     void SetSwitchInfo(bool isToR, uint32_t switch_id);
