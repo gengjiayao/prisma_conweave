@@ -51,3 +51,4 @@ __pycache__/
 *.swp
 *.swo
 conweave-ns3-main/mix/.history
+.DS_Store
