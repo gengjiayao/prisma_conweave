@@ -495,3 +495,7 @@ python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --arg
 python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/86357279/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/86357279/config.log 2>&1
 python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/86357279/config.txt'
 
+12/24/25,391336818,1,7,1000,4,16,64,400,1,0,0,0,leaf_spine_128_100G_OS2,1,AliStorage2019,50,0.3
+python2 ./waf --run 'scratch/network-load-balance /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/391336818/config.txt' > /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/391336818/config.log 2>&1
+python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s /workspace/PRISMA_conweave/conweave-ns3-main/mix/output/391336818/config.txt'
+

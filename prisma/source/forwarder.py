@@ -468,7 +468,9 @@ class Forwarder(Agent):
                     except Exception:
                         pass
 
-                # —— 调试打印：收到/写入的 reward 与 temp_obs 规模 ——
+                if Agent.signaling_type in ("NN", "target") and Agent.signalingSim == 0:
+                    self._get_upcoming_events()
+
                 # —— 本地闭环：先用当前 (r_env, obs) 关闭上一拍 (s_{t-1}, a_{t-1}) ——
                 had_pending = (self.index in Agent.pending)
                 pend = Agent.pending.pop(self.index, None)
@@ -480,8 +482,7 @@ class Forwarder(Agent):
                             pend["action"],
                             float(r_env),
                             np.array(obs, dtype=float).squeeze(),
-                            #done_flag,
-                            episode_done,
+                            pkt_done,
                         )
                     elif Agent.signaling_type == "NN":
                         self._push_upcoming_event(self.index, {
@@ -490,8 +491,7 @@ class Forwarder(Agent):
                             "action": pend["action"],
                             "reward": float(r_env),
                             "new_obs": np.array(obs, dtype=float).squeeze(),
-                            #"flag": done_flag,
-                            "flag": episode_done,
+                            "flag": pkt_done,
                             "pkt_id": getattr(self, "pkt_id", -1),
                         })
                         if Agent.signalingSim == 0 and self.train:
@@ -518,6 +518,13 @@ class Forwarder(Agent):
                     except Exception:
                         pass
 
+                if is_ctrl:
+                    if episode_done:
+                        if will_reach_max:
+                            print("Done by max number of arrived pkts")
+                        break
+                    continue # if it is a control packet, continue
+
                 # —— 登记本拍 (s_t=prev_obs, a_t=self.action)，待下一拍 r_{t+1} 来闭环 ——
                 if (not is_ctrl) and not (getattr(self, "signaling", False) or prev_obs[0] == self.index or prev_obs[0] in (-1, 1000)):
                     try:
@@ -530,32 +537,6 @@ class Forwarder(Agent):
                         "next_hop_degree": next_hop_degree,
                     }
 
-                ## Treat the info from the env（控制包也完成了闭环与登记）
-                #if self.treat_info(info):
-                if Agent.signaling_type in ("NN", "target") and Agent.signalingSim == 0:
-                    self._get_upcoming_events()
-                if is_ctrl:
-                    if episode_done:
-                        # —— 兜底：episode 结束，把最后一个 pending 关掉（terminal）——
-                        final_pend = Agent.pending.pop(self.index, None)
-                        if final_pend is not None:
-                            try:
-                                Agent.replay_buffer[self.index].add(
-                                    final_pend["obs"],
-                                    final_pend["action"],
-                                    0.0,
-                                    np.array(obs, dtype=float).squeeze(),
-                                    True
-                                )
-                                if getattr(Agent, "debug_reward", False):
-                                    print(f"[DBG][node {self.index}] terminal-close pending: action={final_pend['action']} r=0.0")
-                            except Exception:
-                                pass
-                        if will_reach_max:
-                            print("Done by max number of arrived pkts")
-                        break
-                    continue # if it is a control packet, continue
-                
                 Agent.nb_transitions += 1
                 if self.pkt_id not in Agent.pkt_tracking_dict.keys(): ## check if the packet is a new arrival
                     self.handle_new_packet(obs)
@@ -567,24 +548,7 @@ class Forwarder(Agent):
                         self.handle_done()
 
                     if episode_done:
-                        # —— 兜底：episode 结束，把最后一个 pending 关掉（terminal）——
-                        final_pend = Agent.pending.pop(self.index, None)
-                        if final_pend is not None:
-                            try:
-                                Agent.replay_buffer[self.index].add(
-                                    final_pend["obs"],
-                                    final_pend["action"],
-                                    0.0,
-                                    np.array(obs, dtype=float).squeeze(),
-                                    True
-                                )
-                                if getattr(Agent, "debug_reward", False):
-                                    print(f"[DBG][node {self.index}] terminal-close pending: action={final_pend['action']} r=0.0")
-                            except Exception:
-                                pass
-
-                        ## check if the episode is done by max number of arrived pkts
-                        #if Agent.max_nb_arrived_pkts > 0 and Agent.max_nb_arrived_pkts <= Agent.total_arrived_pkts:
+                        Agent.pending.pop(self.index, None)
                         if will_reach_max:
                             print("Done by max number of arrived pkts")
                         break
