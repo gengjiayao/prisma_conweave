@@ -166,7 +166,7 @@ def main():
     parser.add_argument('--netload', dest='netload', action='store', type=int,
                         default=6, help="Network load at NIC to generate traffic (default: 6)")
     parser.add_argument('--bw', dest="bw", action='store',
-                        default='100', help="the NIC bandwidth (Gbps) (default: 100)")
+                        default='1', help="the NIC bandwidth (Gbps) (default: 100)")
     parser.add_argument('--topo', dest='topo', action='store',
                         default='leaf_spine_128_100G', help="the name of the topology file (default: leaf_spine_128_100G_OS2)")
     parser.add_argument('--cdf', dest='cdf', action='store',

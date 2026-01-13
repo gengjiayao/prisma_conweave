@@ -84,23 +84,13 @@ class Trainer(Agent):
             #     raise(1)
             # actions_t = tf.constant(actions_t[action_indices_all], shape=(Agent.batch_size))
             # targets_t = tf.constant(tf.concat(targets_t, axis=0), shape=(Agent.batch_size))
-            ### Construct the target values (local bootstrap with this leaf's target Q)
-            obses_t = tf.constant(obses_t)
-            actions_t = tf.constant(actions_t, shape=(Agent.batch_size))
-            next_obses = tf.constant(np.array(np.vstack(next_obses_t), dtype=float))
-            if Agent.signaling_type in ("NN", "ideal"):
-                filtered_indices = np.arange(Agent.agents[self.index].num_actions)
-                targets_t = Agent.agents[self.index].get_target_value(
-                    tf.constant(rewards_t, dtype=float),
-                    next_obses,
-                    tf.constant(dones_t),
-                    filtered_indices,
-                )
-            else:
-                targets_t = tf.constant(rewards_t, dtype=float)
-            targets_t = tf.constant(targets_t, shape=(Agent.batch_size))
+            # Use immediate reward as target (disable local bootstrap).
+            obses_t = tf.convert_to_tensor(obses_t, dtype=tf.float32)
+            actions_t = tf.convert_to_tensor(actions_t, dtype=tf.int32)
+            targets_t = tf.convert_to_tensor(rewards_t, dtype=tf.float32)
+            targets_t = tf.reshape(targets_t, shape=(Agent.batch_size,))
         
-        weights = tf.constant(weights, dtype=float)
+        weights = tf.convert_to_tensor(weights, dtype=tf.float32)
 
         ### Make a gradient step
         td_errors = Agent.agents[self.index].train(obses_t, actions_t, targets_t, weights)

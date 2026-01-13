@@ -27,7 +27,7 @@ lb_modes = {
     9: "conweave",
 }
 topo2bdp = {
-    "leaf_spine_128_100G_OS2": 104000,  # 2-tier -> all 100G
+    "leaf_spine_128_100G_OS2": 5000,  # 2-tier -> all 100G
     "fat_k8_100G_OS2": 156000,  # 3-tier -> all 100G
 }
 
