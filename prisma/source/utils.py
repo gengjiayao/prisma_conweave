@@ -158,6 +158,46 @@ def convert_bps_to_data_rate(bps):
 
     return data_rate*p
 
+def normalize_obs(obs: np.ndarray, dst_scale: float = None, feat_scale: float = None) -> np.ndarray:
+    """
+    Normalize observation values to reduce scale mismatch.
+
+    Expected obs layout: [dstOverlay, feat_1, feat_2, ...].
+    """
+    if obs is None:
+        return obs
+    try:
+        arr = np.asarray(obs, dtype=float)
+    except Exception:
+        arr = np.asarray(obs)
+
+    dst_default = 64.0
+    feat_default = 5000.0  # BDP for 1Gbps RTT=8.32us, was 1e6 (collapsed all CONGA features to ~0)
+    dst_scale = float(os.getenv("PRISMA_OBS_DST_SCALE", dst_default if dst_scale is None else dst_scale))
+    feat_scale = float(os.getenv("PRISMA_OBS_FEAT_SCALE", feat_default if feat_scale is None else feat_scale))
+    if dst_scale <= 0:
+        dst_scale = dst_default
+    if feat_scale <= 0:
+        feat_scale = feat_default
+
+    if arr.ndim == 1:
+        if arr.size == 0:
+            return arr
+        out = arr.copy()
+        out[0] = out[0] / dst_scale
+        if out.size > 1:
+            out[1:] = out[1:] / feat_scale
+        return out
+    if arr.ndim == 2:
+        if arr.shape[1] == 0:
+            return arr
+        out = arr.copy()
+        out[:, 0] = out[:, 0] / dst_scale
+        if out.shape[1] > 1:
+            out[:, 1:] = out[:, 1:] / feat_scale
+        return out
+    return arr
+
 def optimal_routing_decision(graph, routing_mat, rejected_mat, actual_node, src_node, dst_node, tag):
     """Compute the action based on the optimal solution
 

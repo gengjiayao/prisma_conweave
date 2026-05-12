@@ -43,6 +43,7 @@ class Agent():
         cl.numEpisodes = params_dict["numEpisodes"]
         cl.seed = params_dict["seed"]
         cl.iterationNum = params_dict["iterationNum"]
+        cl.exploration_schedule_timesteps = params_dict.get("exploration_schedule_timesteps", 0)
         cl.prioritizedReplayBuffer=params_dict["prioritizedReplayBuffer"]
         cl.simArgs = {"--simTime": cl.iterationNum,
                     "--testArg": 123}

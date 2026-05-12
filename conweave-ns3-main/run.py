@@ -118,7 +118,7 @@ lb_modes = {
 }
 
 topo2bdp = {
-    "leaf_spine_128_100G_OS2": 5000,  # 2-tier -> all 1Gbps
+    "leaf_spine_128_100G_OS2": 5000,  # 100Gbps RTT=8320ns
     "fat_k8_100G_OS2": 156000,  # 3-tier -> all 100Gbps
 }
 
@@ -467,7 +467,7 @@ def main():
     qlen_mon_start = flowgen_start_time
     qlen_mon_end = flowgen_stop_time
 
-    if (cc_mode == 1):  # DCQCN
+    if (cc_mode in [1, 3, 7, 8]):  # DCQCN
         ai = 10 * bw / 25
         hai = 25 * bw / 25
         dctcp_ai = 1000

@@ -45,61 +45,69 @@ class Trainer(Agent):
     def step(self):
         """
         Do a training step
+        
+        【修复说明】
+        针对MSE Loss爆炸问题，本版本实现了以下关键修复：
+        1. 使用 Huber Loss 替代 MSE Loss（对异常值更鲁棒）
+        2. 更激进的 Q 值裁剪（上界从 20 降到 5）
+        3. Reward Clipping（限制在 [-1, 1]）
+        4. 梯度裁剪（防止梯度爆炸）
+        5. TD Error 监控（记录 Huber Loss 和 MSE 双版本）
         """
         self.last_training_time = Agent.curr_time
         ## sample from the replay buffer
-        obses_t, actions_t, rewards_t, next_obses_t, dones_t, weights = Agent.replay_buffer[self.index].sample(Agent.batch_size)   
+        obses_t, actions_t, rewards_t, next_obses_t, dones_t, weights = Agent.replay_buffer[self.index].sample(Agent.batch_size)
         if Agent.signaling_type == "target":
             targets_t = tf.constant(rewards_t, dtype=float)
             obses_t = tf.constant(obses_t)
             actions_t = tf.constant(actions_t)
         else:
-            # ### Construct the target values
-            # targets_t = []
-            # action_indices_all = []
-            # for indx, neighbor in enumerate(self.neighbors): #这里修改前，仅对leaf建立Agent，但是neighbor会包含spine
-            #     filtered_indices = np.where(np.array(list(Agent.G.neighbors(neighbor)))!=self.index)[0] # filter the net interface from where the pkt comes
-            #     # filtered_indices = np.where(np.array(list(Agent.G.neighbors(neighbor)))!=1000)[0] # filter the net interface from where the pkt comes
-            #     action_indices = np.where(actions_t == indx)[0]
-            #     action_indices_all.append(action_indices)
-            #     if len(action_indices):
-            #         if neighbor not in Agent.agents or Agent.agents[neighbor] is None: #消除spine的干扰
-            #             targets_t.append(tf.convert_to_tensor(rewards_t[action_indices], dtype = tf.float32))
-            #             continue
-            #         if Agent.signaling_type in ("NN", "ideal"):
-            #             targets_t.append(Agent.agents[self.index].get_neighbor_target_value(indx, 
-            #                                                                                 rewards_t[action_indices], 
-            #                                                                                 tf.constant(np.array(np.vstack(next_obses_t[action_indices]),
-            #                                                                                                     dtype=float)), 
-            #                                                                                 dones_t[action_indices],
-            #                                                                                 filtered_indices))
-            # action_indices_all = np.concatenate(action_indices_all)
-            # ### prepare tf variables
-            # try:
-            #     obses_t = tf.constant(obses_t[action_indices_all,])
-            # except:
-            #     print("ERROR")
-            #     print("Node: ", self.index)
-            #     print(obses_t[0], obses_t.shape, type(obses_t[0]))
-            #     raise(1)
-            # actions_t = tf.constant(actions_t[action_indices_all], shape=(Agent.batch_size))
-            # targets_t = tf.constant(tf.concat(targets_t, axis=0), shape=(Agent.batch_size))
-            # Use immediate reward as target (disable local bootstrap).
             obses_t = tf.convert_to_tensor(obses_t, dtype=tf.float32)
             actions_t = tf.convert_to_tensor(actions_t, dtype=tf.int32)
-            targets_t = tf.convert_to_tensor(rewards_t, dtype=tf.float32)
-            targets_t = tf.reshape(targets_t, shape=(Agent.batch_size,))
+            next_obses_t = tf.convert_to_tensor(next_obses_t, dtype=tf.float32)
+            
+            # 【修复1】Reward Clipping：限制 reward 在 [-1, 1] 范围
+            # 这能有效防止极端 reward 值导致的 Q 值爆炸
+            rewards_clipped = np.clip(rewards_t, -1.0, 1.0)
+            
+            # Compute TD target: r + gamma * max_a' Q_target(s', a') * (1 - done)
+            next_q_values = Agent.agents[self.index].target_q_network(next_obses_t)
+            max_next_q = tf.reduce_max(next_q_values, axis=1)
+            
+            # 【修复2】更激进的 Q 值裁剪
+            # 原始：q_upper_bound = 2.0 / (1.0 - gamma) ≈ 20 (gamma=0.9)
+            # 修复：假设 reward ∈ [-1, 1]，Q 上界 ≈ 1/(1-gamma) ≈ 10
+            # 实际使用更保守的值 5.0，因为跨节点状态污染会导致 Q 值估计不准
+            q_upper_bound = 5.0  # 更保守的上界
+            max_next_q = tf.clip_by_value(max_next_q, -q_upper_bound, q_upper_bound)
+            
+            # TD target（使用 clipped reward）
+            targets_t = rewards_clipped + Agent.gamma * max_next_q * (1.0 - dones_t)
+            
+            # 【修复3】对 target 做最终裁剪
+            targets_t = tf.clip_by_value(targets_t, -q_upper_bound, q_upper_bound)
+            targets_t = tf.convert_to_tensor(targets_t, dtype=tf.float32)
         
         weights = tf.convert_to_tensor(weights, dtype=tf.float32)
 
-        ### Make a gradient step
+        ### Make a gradient step (使用 Huber Loss)
         td_errors = Agent.agents[self.index].train(obses_t, actions_t, targets_t, weights)
         
         ## log the td error and replay buffer length
         if len(td_errors):
             with self.tb_writer_dict["td_error"].as_default():
-                tf.summary.scalar('MSE_loss_over_steps', np.mean(td_errors**2), step=self.gradient_step_idx)
-                tf.summary.scalar('MSE_loss_over_time', np.mean(td_errors**2), step=int((Agent.base_curr_time  + Agent.curr_time)*1e6))
+                # 记录 Huber Loss（实际训练使用的 loss）
+                huber_loss_val = np.mean(np.abs(td_errors))  # Huber loss 的近似
+                tf.summary.scalar('Huber_loss_over_steps', huber_loss_val, step=self.gradient_step_idx)
+                tf.summary.scalar('Huber_loss_over_time', huber_loss_val, step=int((Agent.base_curr_time + Agent.curr_time)*1e6))
+                # 同时记录 MSE Loss 用于对比诊断
+                mse_loss_val = np.mean(td_errors**2)
+                tf.summary.scalar('MSE_loss_over_steps', mse_loss_val, step=self.gradient_step_idx)
+                tf.summary.scalar('MSE_loss_over_time', mse_loss_val, step=int((Agent.base_curr_time + Agent.curr_time)*1e6))
+                # 记录 Q 值范围用于诊断
+                tf.summary.scalar('target_mean', float(tf.reduce_mean(targets_t).numpy()), step=self.gradient_step_idx)
+                tf.summary.scalar('target_max', float(tf.reduce_max(targets_t).numpy()), step=self.gradient_step_idx)
+                tf.summary.scalar('target_min', float(tf.reduce_min(targets_t).numpy()), step=self.gradient_step_idx)
         with self.tb_writer_dict["replay_buffer_length"].as_default():
             tf.summary.scalar('replay_buffer_length_over_steps', len(Agent.replay_buffer[self.index]), step=self.gradient_step_idx)
             tf.summary.scalar('replay_buffer_length_over_time', len(Agent.replay_buffer[self.index]), step=int((Agent.base_curr_time + Agent.curr_time)*1e6))

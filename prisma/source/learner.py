@@ -171,6 +171,11 @@ class DQN_AGENT(tf.Module):
             q_t_selected_targets: batch of TD targets
             importance_weights: batch of importance weights
             lock: lock to give access to the q network
+        
+        【修复说明】
+        1. 使用 Huber Loss（对异常值更鲁棒）
+        2. 添加梯度裁剪（防止梯度爆炸）
+        3. 使用 stop_gradient 确保 target 不参与梯度计算
         """
         with tf.GradientTape() as tape:
             tape.watch(obs)
@@ -178,15 +183,26 @@ class DQN_AGENT(tf.Module):
             q_t_selected = tf.reduce_sum(q_t * tf.one_hot(actions, self.num_actions, dtype=tf.float32), 1)
 
             td_error = q_t_selected - tf.stop_gradient(q_t_selected_targets)
-            errors = huber_loss(td_error)
-            # errors = tf.square(td_error)
+            
+            # 【修复】使用 Huber Loss（delta=1.0）
+            # Huber Loss 对小误差使用平方，对大误差使用线性，有效抑制异常值影响
+            errors = huber_loss(td_error, delta=1.0)
+            
             weighted_error = tf.reduce_mean(importance_weights * errors)
+        
         grads = tape.gradient(weighted_error, self.q_network.trainable_variables)
+        
+        # 【修复】更严格的梯度裁剪
+        # 原代码有 bug：clipped_grads = grads 覆盖了裁剪结果
         if self.grad_norm_clipping:
             clipped_grads = []
             for grad in grads:
-                clipped_grads.append(tf.clip_by_norm(grad, self.grad_norm_clipping))
-            clipped_grads = grads
+                if grad is not None:
+                    clipped_grads.append(tf.clip_by_norm(grad, self.grad_norm_clipping))
+                else:
+                    clipped_grads.append(grad)
+            grads = clipped_grads
+        
         grads_and_vars = zip(grads, self.q_network.trainable_variables)
         self.optimizer.apply_gradients(grads_and_vars)
 

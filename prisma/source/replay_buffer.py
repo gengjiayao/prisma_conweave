@@ -1,5 +1,6 @@
 import numpy as np
 import random
+from source.utils import normalize_obs
 
 __author__ = "Redha A. Alliche, Tiago Da Silva Barros, Ramon Aparicio-Pardo, Lucile Sassatelli"
 __copyright__ = "Copyright (c) 2022 Redha A. Alliche, Tiago Da Silva Barros, Ramon Aparicio-Pardo, Lucile Sassatelli"
@@ -47,11 +48,14 @@ class ReplayBuffer(object):
             obses_tp1.append(obs_tp1)
             dones.append(done)
         try:
-            return np.array(obses_t), np.array(actions), np.array(rewards), np.array(obses_tp1, dtype=object), np.array(dones), np.ones(len(idxes), dtype=np.float32)
+            obs_batch = normalize_obs(np.array(obses_t, dtype=float))
+            next_obs_batch = normalize_obs(np.array(obses_tp1, dtype=float))
+            return obs_batch, np.array(actions), np.array(rewards), next_obs_batch, np.array(dones), np.ones(len(idxes), dtype=np.float32)
         except:
             print("ERROR")
             print(obses_t)
             raise(1)
+
     def sample(self, batch_size):
         """Sample a batch of experiences.
         Parameters
@@ -348,7 +352,7 @@ class ReplayBuffer_(object):
         """
         Helper for normalizing the observation.
         """
-        return obs
+        return normalize_obs(obs)
 
     @staticmethod
     def _normalize_reward(reward: np.ndarray) -> np.ndarray:

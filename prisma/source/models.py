@@ -36,45 +36,50 @@ class SplitLayer(layers.Layer):
 
         return seq
 
-def DQN_buffer_lighter_model(observation_shape, num_actions, num_nodes, input_size_splits): # lite 
-    """The DQN buffer lighter model : 
-        - The input : tensor with shape (batch_size, num_actions + 1) containing the : destination of the packet and the length of each output buffer in bytes.
+def DQN_buffer_lighter_model(observation_shape, num_actions, num_nodes, input_size_splits): # lite
+    """The DQN buffer lighter model :
+        - The input : tensor with shape (batch_size, 2 + num_actions*K) containing:
+            [dstOverlay, lastAction, neighbor_features...]
         - The output : tensor with shape (batch_size, num_actions) containing the estimated delay for routing the packet to an output buffer.
-        - The architecture : 
-            1- Split the input to separate the destination from the output buffers.
+        - The architecture :
+            1- Split the input to separate [dstOverlay, lastAction] from neighbor features.
             2- Encode the destination id using one hot encoding.
-            3- Apply a layer Normalisation to the output buffer input. 
-            4- Push each block (destination and output buffers) to a dense layer with size 16.
-            5- Concat the output of each of the two blocks.
+            3- Encode lastAction using one hot encoding (num_actions classes).
+            4- Apply a layer Normalisation to the neighbor features.
+            5- Push each block to a dense layer with size 16.
+            6- Concat the output of each block.
             7- Apply a Dense layer of size 32.
-            8- Apply a Dense layer of size num_actions.   
+            8- Apply a Dense layer of size num_actions.
 
     Args:
         observation_shape (List): shape of the inputs.
         num_actions (list): shape of the outputs.
         num_nodes (int): number of nodes in the network.
-        input_size_splits (list): the shape of the split.
+        input_size_splits (list): the shape of the split [1, 1, num_actions*K].
 
     Returns:
         model : keras NN model.
     """
     inp = layers.Input(shape=observation_shape)
-    one_hot_layer = layers.Lambda(lambda x: K.one_hot(K.cast(x,'int64'), num_nodes))
+    one_hot_dst = layers.Lambda(lambda x: K.one_hot(K.cast(x,'int64'), num_nodes))
+    one_hot_act = layers.Lambda(lambda x: K.one_hot(K.cast(x,'int64'), num_actions))
     split = SplitLayer(num_or_size_splits=input_size_splits)(inp)
     
     tensors_2_concat = []
     for s in range(len(input_size_splits)):
         if input_size_splits[s] == 0: continue
 
-        if s ==0:
-            flattened_split = layers.Flatten()(one_hot_layer(split[s]))
-        else:
+        if s == 0:  # dstOverlay
+            flattened_split = layers.Flatten()(one_hot_dst(split[s]))
+        elif s == 1:  # lastAction
+            flattened_split = layers.Flatten()(one_hot_act(split[s]))
+        else:  # neighbor features
             flattened_split = layers.LayerNormalization(center=False, scale=False, trainable=False, axis=1)(split[s])
 
         out_split = layers.Dense(units=16, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(flattened_split)
         tensors_2_concat.append(out_split)
     
-    if len(tensors_2_concat) > 1:    
+    if len(tensors_2_concat) > 1:
         concatted = layers.Concatenate(axis=1)(tensors_2_concat)
     else:
         concatted = tensors_2_concat[0]
@@ -215,7 +220,15 @@ def DQN_buffer_lite_model(observation_shape, num_actions, num_nodes, input_size_
     second_block = layers.LayerNormalization(center=False, scale=False, trainable=False, axis=1, input_shape=(None, num_nodes))(split[1])
     second_block = layers.Dense(units=16, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform', input_shape=(None, num_nodes))(second_block)
 
+    # [Fix 2026-05-12] CRITICAL: split[2] is the 40-dim CONGA port features
+    # (8 ports x 5 features: cost, ce_local, ce_remote_min, age, cov)
+    # Previously this entire block was DISCARDED, causing Q-network to have
+    # no congestion awareness. Now wire it through LayerNorm + Dense.
     tensors_2_concat = [first_block, second_block]
+    if len(input_size_splits) >= 3:
+        third_block = layers.LayerNormalization(center=False, scale=False, trainable=False, axis=1)(split[2])
+        third_block = layers.Dense(units=32, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(third_block)
+        tensors_2_concat.append(third_block)
     if len(tensors_2_concat) > 1:    
         concatted = layers.Concatenate(axis=1)(tensors_2_concat)
     else:

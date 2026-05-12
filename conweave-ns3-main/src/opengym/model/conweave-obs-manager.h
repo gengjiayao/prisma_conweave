@@ -32,8 +32,10 @@ public:
   ConweaveObsManager () {}
   virtual ~ConweaveObsManager ();
 
-  // 每个出口的观测特征维度（cost_bytes, ce_local, ce_remote_min, age, cov）
+  // 每个出口的观测特征维度（cost_bytes, ce_local, ce_remote_min, queueDeriv, cov）
   static constexpr uint32_t kFeatsPerEgress = 5;
+  // 观测维度：[dstOverlay, lastAction] + N_neighbors * kFeatsPerEgress
+  static constexpr uint32_t kObsHeaderDims = 2;
 
   // 9.22 一次性初始化overlay邻居序号,overlay->ns3节点id映射,ns3节点id->overlay序号映射
   void Configure(Ptr<SwitchNode> sw,
@@ -58,6 +60,8 @@ public:
   uint64_t GetLastPktId()   const { return m_lastPktId; }
   uint32_t GetLastPktSize() const { return m_lastPktSize; }
   int      GetLastDstOverlay() const { return m_lastDstOverlay; }
+  bool     LastActionApplied() const { return m_lastActionApplied; }
+  uint64_t GetActionSeq() const { return m_actionSeq; }
   
   // 清空本次逐跳缓存（动作后调用，防止 post-action 的下一状态复用旧 pkt）
   void ResetPreparedObservation();
@@ -184,27 +188,35 @@ private:
   struct EgressPortStats {
     uint64_t lastTxBytes = 0;
     uint64_t accTxBytes = 0;
+    uint64_t accAckPkts = 0;
+    uint64_t accAckBytes = 0;
     double   bwBps = 0.0;
     double   avgQueueBytes = 0.0;
-    uint64_t accAckBytes = 0;
-    uint64_t accAckPkts = 0;
-    uint64_t accDupAcks = 0;
-    uint32_t lastAckSeq = 0; // best-effort seq tracking for dup detection
-    
-    // Fixed window aggregation (ACC style)
     // 现在的窗口机制已经移除
     double winStartSec = 0.0;
     double lastQueueSampleSec = 0.0;
     uint64_t ackBytesWin = 0;
     double queueIntBytes = 0.0;
+
+    // === [DRE] T_port 重设计：指数衰减字节累加器 0505===
+    double dre_bytes = 0.0;            // DRE 累加器（衰减字节）
+    double last_dre_update_time = 0.0; // 上次更新时间（秒）
     
     // Ten-step ACC thresholds
     std::array<double,10> qSteps{};
+    double qLmin = 0.0;
+    double qLmax = 0.0;
+    double qRttSec = 0.0;
+    double qBdpBytes = 0.0;
     // Smoothed queue score (for low-pass filtering of qScore)
     double qSmooth = 1.0;
 
     // B1) QCN/NACK窗内计数
     uint64_t ackWinCtrl = 0, nackWinCtrl = 0;
+
+    // === 新增：队列变化率 EMA（拥塞预警） ===
+    double lastQueueBytes = 0.0;      // 上一次采样的队列字节数
+    double queueDerivEma = 0.0;       // 队列变化率的 EMA (bytes/sec)
   };
 
   struct AckWin {
@@ -243,10 +255,12 @@ private:
   std::unordered_map<uint32_t, EgressPortStats> m_portStats; // key: outIf
   // TTL for flow->outIf mappings (seconds); mappings older than this are discarded
   double m_flowMapTtlSec = 0.05;  // 50ms, for flow->outIf mapping
-  // 调参：加大队列权重，降低利用率权重，保持乱序权重
-  double m_rewardWUtil = 0.2;
-  double m_rewardWQueue = 0.6;
-  double m_rewardWDup = 0.2;
+  // 调参：侧重吞吐，降低队列权重，保持乱序权重
+  // 修复 Reward 停滞问题：提高吞吐权重以突破物理地板
+  double m_rewardWUtil = 0.6;   // 吞吐权重：0.6（主要优化目标）
+  double m_rewardWQueue = 0.2;  // 队列权重：0.2（次要目标）
+  double m_rewardWDup = 0.2;    // 乱序权重：0.2（保持）
+  double m_dreTau = 1e-3;  // [DRE] T_port 衰减时间常数（秒），1ms 0505添加
   // C) 调参：启用一个小的均衡权重
   double m_rewardWBalance = 0.05; // 默认启用轻度均衡
   // B1) 新增：QCN/NACK惩罚项权重，由于和窗口强相关，先关闭，等稳定后可以再打开
@@ -258,6 +272,10 @@ private:
   double m_rewardMinSpanSec = 0; //不再使用
   // C) 调参：字节触发阈值与BDP对齐
   uint64_t m_rewardByteMin = 8 * 1024; // 8KB (approx 1 BDP)
+  // Queue score reference scale: max(alpha*BDP, beta*BufferCap), with floor
+  double m_queueRefAlphaBdp = 4.0;
+  double m_queueRefBetaBuf = 0.1;
+  double m_queueRefMinBytes = 32.0 * 1024;
   // Low-pass factor for queue score smoothing
   // 调稳：队列平滑系数减小（慢一点）
   double m_qSmoothLambda = 0.1;
@@ -266,6 +284,8 @@ private:
   double m_winStartSec = 0.0;
   double m_lastRewardTimeSec = 0.0;
   uint32_t m_lastActionOutIf = 0;
+  bool m_lastActionApplied = false;
+  uint64_t m_actionSeq = 0;
   // 切换：true=返回各端口增量之和（delta），false=返回水平值r（默认）
   bool m_useDeltaReward = false;
 
@@ -312,7 +332,7 @@ private:
   };
   std::unordered_map<uint64_t, FlowletCtx> m_flowlets; // flowKey -> ctx
   double m_flowletGapSec = 20e-6;    // flowlet的gap阈值，RTT的一半较为合适，config中看maxRTT
-  double m_minDwellSec   = 0.0;      // disable dwell to allow per-flowlet decisions
+  double m_minDwellSec   = 1.5e-3;   // 最小驻留时间 1.5ms，防止路由暴切引发微突发
   uint64_t m_flowletKeyHeld = 0;     // flowKey for the currently suspended first packet
 
   // ==== Reward CSV logging ====

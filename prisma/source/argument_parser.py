@@ -78,7 +78,12 @@ def parse_arguments():
     group3.add_argument('--smart_exploration', type=int, help='if true, explore using probability proportional to the inverse of the number of time the action was taken (used when training and exploration enabled)', default=0)
     group3.add_argument('--batch_size', type=int, help='Size of a batch (used when training)', default=256)
     group3.add_argument('--gamma', type=float, help='Gamma ratio for RL (used when training)', default=1)
-    group3.add_argument('--iterationNum', type=int, help='Max iteration number for exploration (used when training)', default=3000)
+    group3.add_argument('--iterationNum', type=int, help='Max iteration number for exploration (used when training)', default=100000)
+    group3.add_argument('--exploration_schedule_timesteps', type=int, 
+                        help='Number of steps to decay epsilon from initial to final. If 0, use iterationNum.', 
+                        default=8000) 
+    
+    #group3.add_argument('--exploration_initial_eps', type=float, help='Exploration intial value (used when training)', default=1.0)
     group3.add_argument('--exploration_initial_eps', type=float, help='Exploration intial value (used when training)', default=1.0)
     group3.add_argument('--exploration_final_eps', type=float, help='Exploration final value (used when training)', default=0.1)
     group3.add_argument('--load_path', type=str, help='Path to DQN models, if not None, loads the models from the given files', default=None)
@@ -103,7 +108,7 @@ def parse_arguments():
     group_conweave.add_argument('--lb', type=str, default='rl', help='LB mode')
     group_conweave.add_argument('--pfc', type=int, default=1, help='Enable PFC')
     group_conweave.add_argument('--irn', type=int, default=0, help='Enable IRN')
-    group_conweave.add_argument('--simul_time', type=float, default=0.3, help='Simulation time')
+    group_conweave.add_argument('--simul_time', type=float, default=5, help='Simulation time')
     group_conweave.add_argument('--buffer', type=int, default=9, help='Switch buffer size')
     group_conweave.add_argument('--netload', type=int, default=50, help='Network load')
     group_conweave.add_argument('--bw', type=int, default=1, help='NIC bandwidth')
@@ -212,7 +217,10 @@ def parse_arguments():
     
     ## compute the loss penalty
     # params["loss_penalty"] = ((((params["max_out_buffer_size"] + 1)*params["packet_size"]*8)/params["link_cap"])) *params["numNodes"]
-    params["loss_penalty"] = ((((params["max_out_buffer_size"] + 512+30)*8)/params["link_cap"])+0.001)* params["numNodes"]
+    params["loss_penalty"] = -abs(
+        ((((params["max_out_buffer_size"] + 512 + 30) * 8) / params["link_cap"]) + 0.001)
+        * params["numNodes"]
+    )
     
 
     return params

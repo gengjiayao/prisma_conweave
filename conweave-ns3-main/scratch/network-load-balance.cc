@@ -226,8 +226,9 @@ bool enable_qcn = true, enable_pfc = true, use_dynamic_pfc_threshold = true;
 uint32_t packet_payload_size = 1000, l2_chunk_size = 0, l2_ack_interval = 0;
 double pause_time = 5;  // PFC pause, microseconds
 double flowgen_start_time = 2.0, flowgen_stop_time = 2.5, simulator_extra_time = 0.1;
-// queue length monitoring time is not used in this simulator
-// uint32_t qlen_dump_interval = 100000000, qlen_mon_interval = 1000;  // ns
+// queue length monitoring (ns)
+uint64_t qlen_dump_interval = 100000000;  // 0.1s
+uint64_t qlen_mon_interval = 1000000;     // 1ms
 uint64_t qlen_mon_start;               // ns
 uint64_t qlen_mon_end;                 // ns
 uint32_t switch_mon_interval = 10000;  // ns
@@ -245,6 +246,7 @@ FILE *voq_output = NULL;
 FILE *voq_detail_output = NULL;
 FILE *uplink_output = NULL;
 FILE *conn_output = NULL;
+FILE *qlen_output = NULL;
 
 std::string data_rate, link_delay, topology_file, flow_file;
 std::string flow_input_file = "flow.txt";
@@ -700,7 +702,7 @@ void get_pfc(FILE *fout, Ptr<QbbNetDevice> dev, uint32_t type) {
 }
 
 /*******************************************************************/
-#if (false)
+#if (true)
 
 /**
  * @brief Qlen monitoring at switches (output: qlen.txt), I think "periodically"...
@@ -1093,8 +1095,8 @@ int main(int argc, char *argv[]) {
                 double v;
                 conf >> v;
                 flowgen_start_time = v;
-                qlen_mon_start = v;
-                qlen_mon_end = v;
+                qlen_mon_start = static_cast<uint64_t>(v * 1e9);
+                qlen_mon_end = static_cast<uint64_t>(v * 1e9);
                 cnp_mon_start = v;
                 irn_mon_start = v;
                 std::cerr << "FLOWGEN_START_TIME\t\t" << flowgen_start_time << "\n";
@@ -1247,10 +1249,14 @@ int main(int argc, char *argv[]) {
                 conf >> conn_mon_file;
                 std::cerr << "CONN_MON_FILE\t\t\t\t" << conn_mon_file << '\n';
             } else if (key.compare("QLEN_MON_START") == 0) {
-                conf >> qlen_mon_start;
+                double v;
+                conf >> v;
+                qlen_mon_start = static_cast<uint64_t>(v * 1e9);
                 std::cerr << "QLEN_MON_START\t\t\t\t" << qlen_mon_start << '\n';
             } else if (key.compare("QLEN_MON_END") == 0) {
-                conf >> qlen_mon_end;
+                double v;
+                conf >> v;
+                qlen_mon_end = static_cast<uint64_t>(v * 1e9);
                 std::cerr << "QLEN_MON_END\t\t\t\t" << qlen_mon_end << '\n';
             } else if (key.compare("MULTI_RATE") == 0) {
                 int v;
@@ -1326,7 +1332,8 @@ int main(int argc, char *argv[]) {
     Config::SetDefault("ns3::QbbNetDevice::PauseTime", UintegerValue(pause_time));
     Config::SetDefault("ns3::QbbNetDevice::QcnEnabled", BooleanValue(enable_qcn));
     Config::SetDefault("ns3::QbbNetDevice::DynamicThreshold", BooleanValue(dynamicth));
-    Config::SetDefault("ns3::QbbNetDevice::QbbEnabled", BooleanValue(enable_pfc));
+    //Config::SetDefault("ns3::QbbNetDevice::QbbEnabled", BooleanValue(enable_pfc));
+    Config::SetDefault("ns3::QbbNetDevice::QbbEnabled", BooleanValue(true));
 
 
     if (cc_mode != 1 && lb_mode == 9) {
@@ -1541,6 +1548,12 @@ int main(int argc, char *argv[]) {
             uint32_t shift = 3;  // by default 1/8
             for (uint32_t j = 1; j < sw->GetNDevices(); j++) {
                 Ptr<QbbNetDevice> dev = DynamicCast<QbbNetDevice>(sw->GetDevice(j));
+
+                //如果pfc=0，就在这里手动关闭设备的PFC功能
+                if (!enable_pfc) {
+                    dev->SetAttribute("QbbEnabled", BooleanValue(false));
+                }
+
                 // set ecn
                 uint64_t rate = dev->GetDataRate().GetBitRate();
                 NS_ASSERT_MSG(rate2kmin.find(rate) != rate2kmin.end(),
@@ -1556,7 +1569,14 @@ int main(int argc, char *argv[]) {
                 // set pfc
                 uint64_t delay =
                     DynamicCast<QbbChannel>(dev->GetChannel())->GetDelay().GetTimeStep();
-                uint32_t headroom = rate * delay / 8 / 1000000000 * 2 + 2 * sw->m_mmu->MTU;
+                //uint32_t headroom = rate * delay / 8 / 1000000000 * 2 + 2 * sw->m_mmu->MTU;
+                //如果PFC关闭将Headroom设置为0，最大化利用buffer，物理上杜绝PFC触发
+                uint32_t headroom;
+                if (enable_pfc) {
+                    headroom = rate * delay / 8 / 1000000000 * 2 + 2 * sw->m_mmu->MTU;
+                } else {
+                    headroom = 0;
+                }
                 sw->m_mmu->ConfigHdrm(j, headroom);
             }
             sw->m_mmu->ConfigNPort(sw->GetNDevices() - 1);
@@ -1607,7 +1627,7 @@ int main(int argc, char *argv[]) {
 
     // manually type BDP
     std::map<std::string, uint32_t> topo2bdpMap;
-    topo2bdpMap[std::string("leaf_spine_128_100G_OS2")] = 5000;  // RTT=8320
+    topo2bdpMap[std::string("leaf_spine_128_100G_OS2")] = 5000;  // 100Gbps RTT=8320ns
     topo2bdpMap[std::string("fat_k8_100G_OS2")] = 156000;      // RTT=12480 --> all 100G links
 
     // topology_file
@@ -2135,9 +2155,19 @@ int main(int argc, char *argv[]) {
                         &stop_simulation_middle);  // check every 100us
     // 从流量生成开始时刻起，按 1ms 仿真时间输出心跳（仅非RL模式）
     Simulator::Schedule(Seconds(flowgen_start_time), &PrintSimHeartbeat);
+    if (qlen_mon_end > qlen_mon_start && !qlen_mon_file.empty()) {
+        qlen_output = fopen(qlen_mon_file.c_str(), "w");
+        if (qlen_output) {
+            if (switch_mon_interval > 0) qlen_mon_interval = switch_mon_interval;
+            Simulator::Schedule(NanoSeconds(qlen_mon_start), &monitor_buffer, qlen_output, &n);
+        } else {
+            std::cerr << "Failed to open QLEN_MON_FILE: " << qlen_mon_file << "\n";
+        }
+    }
     Simulator::Stop(Seconds(flowgen_stop_time + 0.1));
     Simulator::Run();
     if (fct_output) { fclose(fct_output); fct_output = NULL; }
+    if (qlen_output) { fclose(qlen_output); qlen_output = NULL; }
 
     // Gracefully notify Python that simulation ended
     for (auto &iface : myOpenGymInterfaces) {

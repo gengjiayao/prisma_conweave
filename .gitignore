@@ -52,3 +52,23 @@ __pycache__/
 *.swo
 conweave-ns3-main/mix/.history
 .DS_Store
+.aider*
+
+# === 补充：大数据/生成文件 ===
+# 整个训练结果目录（含 TensorBoard、模型、统计 CSV 等）
+**/results/
+# 自动生成的流量文件
+**/L_*_flow.txt
+**/L_*_flow_*.txt
+# Docker 镜像 tar
+*.tar
+conweave-prisma.tar
+# Git bundle
+*.bundle
+diff.bundle
+# 其他大数据
+**/reward_breakdown_*.csv
+**/*_out_fct*.txt
+**/*_out_qlen.txt
+**/*_out_voq*.txt
+**/*_in.txt

@@ -189,6 +189,8 @@ ConweaveRoutingEnv::GetExtraInfo() //9.5版本
     // 返回完整键列表的占位，避免 Python 端解析异常
     std::ostringstream oss; oss.setf(std::ios::fixed); oss<<std::setprecision(6);
     const double nowSec = Simulator::Now().GetSeconds();
+    const uint32_t actionApplied = (m_obsMgr && m_obsMgr->LastActionApplied()) ? 1u : 0u;
+    const uint64_t actionSeq = m_obsMgr ? m_obsMgr->GetActionSeq() : 0;
     oss << "delay_time=" << 0.0 << ","
         << "pkt_size=" << 0.0 << ","
         << "curr_time=" << nowSec << ","
@@ -207,7 +209,9 @@ ConweaveRoutingEnv::GetExtraInfo() //9.5版本
         << "global_injected=" << 0.0 << ","
         << "global_buffered=" << 0.0 << ","
         << "signaling_overhead=" << 0.0 << ","
-        << "lost_packets_id=" << ";";
+        << "lost_packets_id=" << ";" << ","
+        << "action_applied=" << actionApplied << ","
+        << "action_seq=" << actionSeq;
     return oss.str();
   }
 
@@ -225,6 +229,9 @@ ConweaveRoutingEnv::GetExtraInfo() //9.5版本
   const double   zero      = 0.0;
 
   std::string lostList = m_obsMgr->DrainLostPacketsSemicolon();
+  if (lostList.empty()) lostList = ";";
+  const uint32_t actionApplied = m_obsMgr->LastActionApplied() ? 1u : 0u;
+  const uint64_t actionSeq = m_obsMgr->GetActionSeq();
   
 
   std::ostringstream oss;
@@ -269,7 +276,9 @@ ConweaveRoutingEnv::GetExtraInfo() //9.5版本
 
   // ---- 索引 18：丢包 UID 列表（分号分隔 & 以分号结尾；空表用 ";"）----
   // Python 端用 tokens[18].split('=')[-1].split(';')[:-1] 解析
-  oss << "lost_packets_id=" << lostList;
+  oss << "lost_packets_id=" << lostList << ","
+      << "action_applied=" << actionApplied << ","
+      << "action_seq=" << actionSeq;
 
   return oss.str();
 }
