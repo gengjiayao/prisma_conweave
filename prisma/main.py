@@ -17,6 +17,7 @@ from source.run_ns3 import run_ns3
 from source.tb_logger import custom_plots, stats_writer_train, stats_writer_test
 from source.argument_parser import parse_arguments
 from source.utils import allocate_on_gpu, fix_seed
+from source.rl_contract import RL_CORE_VERSION, checkpoint_manifest
 from time import sleep, time
 import numpy as np
 import threading
@@ -29,6 +30,25 @@ from tensorboard.plugins.hparams import api as hp
 import subprocess, signal
 import shlex
 import pathlib
+
+
+def _stop_owned_process(proc, timeout=5.0):
+    """Reap a simulator launcher, terminating its process group if needed."""
+    if proc is None:
+        return
+    if proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait(timeout=timeout)
 
 
 def main():
@@ -49,12 +69,32 @@ def main():
 
     ## fix the seed
     fix_seed(params["seed"])
+
+    # Baselines do not expose ns3-gym sockets.  Starting Forwarders for them
+    # blocks forever in Ns3Env.reset(), so run and reap the simulator directly.
+    if params["lb"] != "rl":
+        for episode in range(params["numEpisodes"]):
+            print(
+                f"running non-RL baseline {params['lb']} "
+                f"(episode {episode + 1}/{params['numEpisodes']})"
+            )
+            baseline_proc = run_ns3(params)
+            try:
+                return_code = baseline_proc.wait()
+            except BaseException:
+                _stop_owned_process(baseline_proc)
+                raise
+            if return_code != 0:
+                raise RuntimeError(
+                    f"Non-RL simulator exited with status {return_code}"
+                )
+        return None, None
     
     ## fill model version
     if "dqn_buffer" not in params["agent_type"] or params["train"] == 1:
         params["model_version"] = ""
     else:
-        params["model_version"] = params["load_path"].split("/")[-1]
+        params["model_version"] = (params["load_path"] or "").split("/")[-1]
     
     ## check if the session already exists and the model is already trained
     if params["train"] == 1:
@@ -91,6 +131,17 @@ def main():
             dict_to_store["G"] = str(params["G"])
             dict_to_store["load_path"] = str(params["load_path"])
             dict_to_store["simArgs"] = str(params["simArgs"])
+            # TensorBoard HParams only accepts bool/int/float/string values.
+            # Keep the runtime None semantics while recording an explicit
+            # sentinel for the optional independent traffic seed.
+            dict_to_store["traffic_seed"] = (
+                "legacy_default"
+                if params["traffic_seed"] is None
+                else str(params["traffic_seed"])
+            )
+            for key, value in tuple(dict_to_store.items()):
+                if value is None:
+                    dict_to_store[key] = "default"
             hp.hparams(dict_to_store)  # record the values used in this trial
     
         ## Define the custom categories in tensorboard
@@ -182,10 +233,12 @@ def main():
 
     forwarders = {}
     trainers = {}
+    trainer_threads = []
+    ns3_proc = None
     for episode in range(params["numEpisodes"]):
         ## run ns3 simulator
         print("running ns-3")
-        ns3_proc_id = run_ns3(params) #此处调用run_ns3启动原PRISMA的ns3部分！！！
+        ns3_proc = run_ns3(params) #此处调用run_ns3启动原PRISMA的ns3部分！！！
         Agent.reset()
         ## run the agents threads
         enabled_nodes = _parse_leaf_overlay_indices(
@@ -194,7 +247,6 @@ def main():
         )
         idx2swid = _load_idx2swid(params["index_to_switch_id_map_path"])  # 仅用于打印
         forwarder_threads = []
-        trainer_threads = []
         for index in enabled_nodes:
             # 友好打印：映射 overlay_index -> switch_id
             swid = idx2swid.get(index, None)
@@ -212,11 +264,11 @@ def main():
                 if episode == 0:
                     trainers[index] = Trainer(index, agent_type=params["agent_type"], train=params["train"])
                     ## start the agent trainer thread
-                    th2 = threading.Thread(target=trainers[index].run, args=(), daemon=True)
+                    th2 = threading.Thread(target=trainers[index].run, args=(), name=f"trainer-{index}", daemon=True)
                     th2.start()
                     trainer_threads.append(th2)
                 else:
-                    trainers[index].reset()
+                    trainers[index].reset_episode()
 
             
         sleep(1)
@@ -260,7 +312,172 @@ def main():
                 """) 
         for idx in list(forwarders.keys()):
             forwarders[idx].env.close()
+        try:
+            ns3_return_code = ns3_proc.wait(timeout=120.0)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("ns-3 launcher did not exit after all Forwarders stopped") from exc
+        if ns3_return_code != 0:
+            raise RuntimeError(f"ns-3 launcher exited with status {ns3_return_code}")
         Agent.base_curr_time += Agent.curr_time
+
+    # Stop all model updates before writing test statistics or final checkpoints.
+    if params["train"] and trainer_threads:
+        for trainer in trainers.values():
+            trainer.stop()
+        join_deadline = time() + 30.0
+        for trainer_thread in trainer_threads:
+            trainer_thread.join(timeout=max(0.0, join_deadline - time()))
+        alive_trainers = [thread.name for thread in trainer_threads if thread.is_alive()]
+        if alive_trainers:
+            raise RuntimeError(
+                "Trainer threads did not stop; refusing to save a potentially inconsistent checkpoint: "
+                + ", ".join(alive_trainers)
+            )
+        print("All trainer threads stopped; draining deterministic replay backlog")
+        for index in sorted(trainers):
+            drained = trainers[index].drain()
+            print(
+                f"[TRAIN-DRAIN] node={index} drained={drained} "
+                f"total_gradient_steps={trainers[index].gradient_step_idx}"
+            )
+
+    # Persist the exact per-node action distribution so an output ID plus the
+    # known session name is enough for post-run diagnosis; terminal output is
+    # not required.
+    policy_action_stats = {}
+    for index, forwarder in forwarders.items():
+        counts = np.asarray(forwarder.policy_action_counts, dtype=np.int64)
+        total = int(np.sum(counts))
+        max_action_ratio = float(np.max(counts) / total) if total > 0 else 0.0
+        greedy_counts = np.asarray(forwarder.greedy_action_counts, dtype=np.int64)
+        greedy_total = int(np.sum(greedy_counts))
+        greedy_max_action_ratio = (
+            float(np.max(greedy_counts) / greedy_total) if greedy_total > 0 else 0.0
+        )
+        policy_action_stats[str(index)] = {
+            "total": total,
+            "counts": counts.tolist(),
+            "ratios": (
+                (counts / total).tolist()
+                if total > 0
+                else np.zeros_like(counts, dtype=float).tolist()
+            ),
+            "max_action_ratio": max_action_ratio,
+            "shadow_greedy": {
+                "total": greedy_total,
+                "counts": greedy_counts.tolist(),
+                "ratios": (
+                    (greedy_counts / greedy_total).tolist()
+                    if greedy_total > 0
+                    else np.zeros_like(greedy_counts, dtype=float).tolist()
+                ),
+                "max_action_ratio": greedy_max_action_ratio,
+            },
+            "exploration": {
+                "random_decisions": int(forwarder.random_action_decisions),
+                "greedy_decisions": int(forwarder.greedy_action_decisions),
+                "behavior_matches_greedy": int(forwarder.behavior_matches_greedy),
+                "epsilon_mean": (
+                    float(forwarder.epsilon_sum / total) if total > 0 else 0.0
+                ),
+                "epsilon_min": forwarder.epsilon_min,
+                "epsilon_max": forwarder.epsilon_max,
+            },
+            "transition_alignment": {
+                "transitions_written": int(forwarder.transitions_written),
+                "action_sequence_mismatches": int(forwarder.action_sequence_mismatches),
+                "first_action_seq": forwarder.first_action_seq,
+                "last_action_seq": forwarder.last_action_seq,
+            },
+            "observation": forwarder.observation_diagnostics(),
+            "reward_by_action": forwarder.reward_diagnostics(),
+            "q_values": forwarder.q_diagnostics(),
+            "training": (
+                trainers[index].training_stats() if index in trainers else None
+            ),
+        }
+        if total >= 100 and max_action_ratio >= 0.9:
+            print(
+                f"WARNING: node {index} policy is highly concentrated "
+                f"(max action ratio={max_action_ratio:.4f})"
+            )
+    os.makedirs(params["logs_folder"], exist_ok=True)
+    policy_action_path = os.path.join(params["logs_folder"], "policy_actions.json")
+    eval_prior_only = bool(params.get("eval_prior_only", 0))
+    if params["train"]:
+        fct_policy = "epsilon_greedy_training"
+    elif eval_prior_only:
+        fct_policy = "rl_native_prior_only"
+    elif float(params.get("eval_epsilon", 0.0)) == 0.0:
+        fct_policy = "greedy_frozen"
+    else:
+        fct_policy = "epsilon_greedy_frozen"
+    with open(policy_action_path, "w") as policy_action_file:
+        json.dump(
+            {
+                "rl_core_version": RL_CORE_VERSION,
+                "seed": int(params["seed"]),
+                "train": int(bool(params["train"])),
+                "eval_epsilon": float(params.get("eval_epsilon", 0.0)),
+                "eval_prior_only": int(eval_prior_only),
+                "fct_policy": fct_policy,
+                "fct_is_final_checkpoint_policy": bool(
+                    not params["train"]
+                    and float(params.get("eval_epsilon", 0.0)) == 0.0
+                    and not eval_prior_only
+                ),
+                "nodes": policy_action_stats,
+            },
+            policy_action_file,
+            indent=2,
+            sort_keys=True,
+        )
+    print(f"Policy action statistics saved to {policy_action_path}")
+
+    traffic_seed = params.get("traffic_seed")
+    traffic_seed = None if traffic_seed is None else int(traffic_seed)
+    run_manifest = checkpoint_manifest()
+    run_manifest.update({
+        "seed": int(params["seed"]),
+        "traffic_seed": traffic_seed,
+        "train": int(bool(params["train"])),
+        "load_path": params.get("load_path"),
+        "session_name": params["session_name"],
+        "evaluation": {
+            "eval_epsilon": float(params.get("eval_epsilon", 0.0)),
+            "eval_prior_only": int(eval_prior_only),
+            "fct_policy": fct_policy,
+        },
+        "optimization": {
+            "batch_size": int(params["batch_size"]),
+            "learning_starts": int(params["learning_starts"]),
+            "train_every": int(params["train_every"]),
+            "target_update_interval": int(params["target_update_interval"]),
+            "exploration_initial_eps": float(params["exploration_initial_eps"]),
+            "exploration_final_eps": float(params["exploration_final_eps"]),
+            "exploration_schedule_timesteps": int(params["exploration_schedule_timesteps"]),
+        },
+        "simulation": {
+            "lb": params["lb"],
+            "cc": params["cc"],
+            "pfc": int(params["pfc"]),
+            "irn": int(params["irn"]),
+            "simul_time": float(params["simul_time"]),
+            "buffer": int(params["buffer"]),
+            "netload": int(params["netload"]),
+            "topo": params["topo"],
+            "traffic_seed": traffic_seed,
+            "conweave_timing_us": {
+                "extra_reply_deadline": params.get("cwh_extra_reply_deadline"),
+                "path_pause_time": params.get("cwh_path_pause_time"),
+                "extra_voq_flush_time": params.get("cwh_extra_voq_flush_time"),
+                "default_voq_waiting_time": params.get("cwh_default_voq_waiting_time"),
+                "tx_expiry_time": params.get("cwh_tx_expiry_time"),
+            },
+        },
+    })
+    with open(os.path.join(params["logs_folder"], "run_manifest.json"), "w") as manifest_file:
+        json.dump(run_manifest, manifest_file, indent=2, sort_keys=True)
     
     ## write the results for the test session
     if params["train"] == 0:
@@ -276,23 +493,24 @@ def main():
         tracer.stop()
         tracer.save() 
         
-    return (ns3_proc_id, tensorboard_process)
+    return (ns3_proc, tensorboard_process)
 
 if __name__ == '__main__':
     ## create a process group
     import traceback
-    ns3_pid, tb_process = None, None
+    ns3_proc, tb_process = None, None
     # os.setpgrp()
     try:
         print("starting process group")
         start_time = time()
-        ns3_pid, tb_process = main()
+        ns3_proc, tb_process = main()
         print("Elapsed time = ", str(datetime.timedelta(seconds= time() - start_time)))
-    except:
+    except Exception:
         traceback.print_exc()
         # write the error in the log file
         with open("examples/error.log", "a") as f:
             traceback.print_exc(file=f)
+        raise
     finally:
         print("graceful shutdown ...")
         # 1) 先发送 ns-3 关闭指令（ZMQ Close），给析构打印留机会
@@ -310,15 +528,10 @@ if __name__ == '__main__':
         # 2) 给 ns-3 一点时间把 stop 消息处理完并运行析构
         sleep(2.0)
 
-        # 3) 尝试温和结束外部进程（先 SIGTERM，再兜底 SIGKILL）
+        # 3) Reap the owned launcher; terminate its process group only if it
+        # is still alive.  Keeping the Popen handle avoids zombie children.
         try:
-            if ns3_pid:
-                try:
-                    os.kill(int(ns3_pid), signal.SIGTERM)  # 让 ns-3 有机会 flush 日志与析构
-                except Exception:
-                    pass
-                sleep(1.0)
-                # 可选：若你有 wait 句柄，用 wait() 更好；这里只做兜底
+            _stop_owned_process(ns3_proc)
         except Exception:
             pass
 

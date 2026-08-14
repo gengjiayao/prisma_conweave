@@ -1629,6 +1629,7 @@ int main(int argc, char *argv[]) {
     std::map<std::string, uint32_t> topo2bdpMap;
     topo2bdpMap[std::string("leaf_spine_128_100G_OS2")] = 5000;  // 100Gbps RTT=8320ns
     topo2bdpMap[std::string("fat_k8_100G_OS2")] = 156000;      // RTT=12480 --> all 100G links
+    topo2bdpMap[std::string("leaf_spine_128_100G_asym_OS2")] = 5000;  // [Asym Adversarial] same BDP as symmetric (1Gbps dominates)
 
     // topology_file
     bool found_topo2bdpMap = false;

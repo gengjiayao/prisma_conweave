@@ -3,8 +3,10 @@ from source.agent import Agent
 import tensorflow as tf
 import numpy as np
 from source.utils import convert_bps_to_data_rate
+from source.rl_contract import scheduled_gradient_steps, should_update_target
 import copy 
 import time
+import threading
 
 __author__ = "Redha A. Alliche, Tiago Da Silva Barros, Ramon Aparicio-Pardo, Lucile Sassatelli"
 __copyright__ = "Copyright (c) 2022 Redha A. Alliche, Tiago Da Silva Barros, Ramon Aparicio-Pardo, Lucile Sassatelli"
@@ -17,30 +19,82 @@ class Trainer(Agent):
     
     def __init__(self, index, agent_type="dqn", train=True):
         Agent.__init__(self, index, agent_type, train)
+        self.stop_event = threading.Event()
         self.reset()
         ## define the log file for td error 
         self.tb_writer_dict = {"td_error": tf.summary.create_file_writer(logdir=f'{Agent.logs_folder}/td_error/node_{self.index}'),
                                "replay_buffer_length": tf.summary.create_file_writer(logdir=f'{Agent.logs_folder}/replay_buffer_length/node_{self.index}')}
     def reset(self):
+        self.stop_event.clear()
         self.last_training_time = 0
         self.last_sync_time = 0
-        self.gradient_step_idx = 1
+        self.gradient_step_idx = 0
+        self.target_update_count = 0
+        self.drain_update_count = 0
+
+    def reset_episode(self):
+        """Reset simulation-time bookkeeping without erasing optimizer progress."""
+        self.last_training_time = 0
+        self.last_sync_time = 0
     def run(self):
         """
             Start the trainer deamon
         """
-        import time
-        while True :
-            time.sleep(np.random.uniform(0.1, 1.5))
+        while not self.stop_event.wait(0.01):
             ## check if there are signaling pkts arrived if signaling type NN
             if Agent.signaling_type in ("NN", "target") and Agent.signalingSim == 0:
                 self._get_upcoming_events()
             ## check if it is time to syncronize nn
             self._check_sync()
                 
-            ## check if it is time to train
-            if Agent.curr_time > (self.last_training_time + Agent.training_step) and Agent.replay_buffer[self.index].total_samples>= Agent.batch_size:
-                self.step()
+            # Consume a bounded amount of work while ns-3 is active.  Any
+            # remaining deterministic backlog is drained after all forwarders
+            # stop and before a checkpoint is written.
+            self.train_available(max_steps=8)
+
+    def desired_gradient_steps(self):
+        """Number of DQN updates due from this node's replay insertions."""
+        return scheduled_gradient_steps(
+            Agent.replay_buffer[self.index].total_samples,
+            Agent.learning_starts,
+            Agent.train_every,
+        )
+
+    def pending_gradient_steps(self):
+        return max(0, self.desired_gradient_steps() - self.gradient_step_idx)
+
+    def train_available(self, max_steps=None):
+        pending = self.pending_gradient_steps()
+        if max_steps is not None:
+            pending = min(pending, int(max_steps))
+        for _ in range(pending):
+            self.step()
+        return pending
+
+    def drain(self):
+        """Finish all updates implied by the final replay size."""
+        drained = 0
+        while self.pending_gradient_steps() > 0:
+            completed = self.train_available(max_steps=64)
+            if completed <= 0:
+                break
+            drained += completed
+        self.drain_update_count += drained
+        return drained
+
+    def training_stats(self):
+        return {
+            "replay_samples": int(Agent.replay_buffer[self.index].total_samples),
+            "replay_size": int(len(Agent.replay_buffer[self.index])),
+            "gradient_steps": int(self.gradient_step_idx),
+            "target_updates": int(self.target_update_count),
+            "drain_updates": int(self.drain_update_count),
+            "pending_gradient_steps": int(self.pending_gradient_steps()),
+        }
+
+    def stop(self):
+        """Request a clean stop after the current gradient step finishes."""
+        self.stop_event.set()
 
     def step(self):
         """
@@ -56,7 +110,12 @@ class Trainer(Agent):
         """
         self.last_training_time = Agent.curr_time
         ## sample from the replay buffer
-        obses_t, actions_t, rewards_t, next_obses_t, dones_t, weights = Agent.replay_buffer[self.index].sample(Agent.batch_size)
+        sample_result = Agent.replay_buffer[self.index].sample(Agent.batch_size)
+        if len(sample_result) == 7:
+            obses_t, actions_t, rewards_t, next_obses_t, dones_t, weights, _ = sample_result
+        else:
+            obses_t, actions_t, rewards_t, next_obses_t, dones_t, weights = sample_result
+
         if Agent.signaling_type == "target":
             targets_t = tf.constant(rewards_t, dtype=float)
             obses_t = tf.constant(obses_t)
@@ -70,15 +129,26 @@ class Trainer(Agent):
             # 这能有效防止极端 reward 值导致的 Q 值爆炸
             rewards_clipped = np.clip(rewards_t, -1.0, 1.0)
             
-            # Compute TD target: r + gamma * max_a' Q_target(s', a') * (1 - done)
-            next_q_values = Agent.agents[self.index].target_q_network(next_obses_t)
-            max_next_q = tf.reduce_max(next_q_values, axis=1)
+            # Double DQN: select the next action with the online network, then
+            # evaluate only that action with the lagged target network.  The
+            # previous max over a randomly initialized target amplified the
+            # largest of eight arbitrary Q values before learning had begun.
+            online_next_q = Agent.agents[self.index].q_network(next_obses_t)
+            next_actions = tf.argmax(online_next_q, axis=1, output_type=tf.int32)
+            target_next_q = Agent.agents[self.index].target_q_network(next_obses_t)
+            max_next_q = tf.reduce_sum(
+                target_next_q
+                * tf.one_hot(next_actions, Agent.agents[self.index].num_actions),
+                axis=1,
+            )
             
             # 【修复2】更激进的 Q 值裁剪
             # 原始：q_upper_bound = 2.0 / (1.0 - gamma) ≈ 20 (gamma=0.9)
             # 修复：假设 reward ∈ [-1, 1]，Q 上界 ≈ 1/(1-gamma) ≈ 10
-            # 实际使用更保守的值 5.0，因为跨节点状态污染会导致 Q 值估计不准
-            q_upper_bound = 5.0  # 更保守的上界
+            # [Bug #10 Fix 2026-05-13] 实测 reward mean=0.808, std=0.041, 98% > 0.7
+            # 真实 Q 值 ≈ 0.808/(1-0.9) = 8.08，被 clip 到 5 → 系统性低估 ~38%
+            # 改回理论上界 10.0（reward 已 clip [-1,1], gamma=0.9 → Q ∈ [-10,10]）
+            q_upper_bound = 10.0  # 5.0 → 10.0
             max_next_q = tf.clip_by_value(max_next_q, -q_upper_bound, q_upper_bound)
             
             # TD target（使用 clipped reward）
@@ -92,12 +162,21 @@ class Trainer(Agent):
 
         ### Make a gradient step (使用 Huber Loss)
         td_errors = Agent.agents[self.index].train(obses_t, actions_t, targets_t, weights)
+        self.gradient_step_idx += 1
+        if should_update_target(
+            self.gradient_step_idx,
+            Agent.target_update_interval,
+        ):
+            Agent.agents[self.index].update_target()
+            self.target_update_count += 1
         
         ## log the td error and replay buffer length
         if len(td_errors):
             with self.tb_writer_dict["td_error"].as_default():
-                # 记录 Huber Loss（实际训练使用的 loss）
-                huber_loss_val = np.mean(np.abs(td_errors))  # Huber loss 的近似
+                td_abs = np.abs(np.asarray(td_errors))
+                huber_loss_val = np.mean(
+                    np.where(td_abs <= 1.0, 0.5 * td_abs ** 2, td_abs - 0.5)
+                )
                 tf.summary.scalar('Huber_loss_over_steps', huber_loss_val, step=self.gradient_step_idx)
                 tf.summary.scalar('Huber_loss_over_time', huber_loss_val, step=int((Agent.base_curr_time + Agent.curr_time)*1e6))
                 # 同时记录 MSE Loss 用于对比诊断
@@ -111,17 +190,14 @@ class Trainer(Agent):
         with self.tb_writer_dict["replay_buffer_length"].as_default():
             tf.summary.scalar('replay_buffer_length_over_steps', len(Agent.replay_buffer[self.index]), step=self.gradient_step_idx)
             tf.summary.scalar('replay_buffer_length_over_time', len(Agent.replay_buffer[self.index]), step=int((Agent.base_curr_time + Agent.curr_time)*1e6))
-        
-        self.gradient_step_idx += 1
     
     def _check_sync(self):
         """
         Check the time to sync the NN depending on the signaling mode
         """
-        ### Sync target NN
+        # Keep neighbor/signaling synchronisation on simulation time.  The
+        # local lagged DQN target is updated separately by gradient count.
         if Agent.curr_time > ((Agent.sync_counters[self.index]+1)*Agent.sync_step):
-                if "dqn" in self.agent_type and Agent.signaling_type != "target":
-                    Agent.agents[self.index].update_target()
                 self._sync_all(update_upcoming=True)
                 Agent.sync_counters[self.index] += 1
                 # print("sync all at %s" % Agent.curr_time, "for node:", self.index, "sync counter:", self.sync_counter)

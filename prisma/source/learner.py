@@ -109,6 +109,9 @@ class DQN_AGENT(tf.Module):
       with tf.name_scope('target_q_network'):
         self.target_q_network = q_func(observation_shape, num_actions, num_nodes, 
                                     input_size_splits)
+      # A DQN target must start as an exact copy of the online network.  An
+      # independently initialised target makes the first Bellman targets random.
+      self.update_target()
       self.eps = tf.Variable(0., name="eps")
       
       self.loss = tf.keras.losses.MeanSquaredError()
@@ -118,14 +121,18 @@ class DQN_AGENT(tf.Module):
       self.neighbors_target_upcoming_q_networks = []
       self.neighbors_target_temp_upcoming_q_networks = []
       
-      # compute per-neighbor feature factor K and residual
-      K = int((observation_shape[0] - 1) // num_actions)
-      residual = int(observation_shape[0] - 1 - num_actions * K)
+      # Shared observation contract: [dst, last_action] + N*K features.
+      payload_dim = int(observation_shape[0] - 2)
+      if payload_dim <= 0 or payload_dim % num_actions != 0:
+        raise ValueError(
+            f"Invalid observation shape {observation_shape} for {num_actions} actions"
+        )
+      K = payload_dim // num_actions
       for neighbor in range(num_actions):
         ndeg = int(neighbors_degrees[neighbor])
         buf_len = int(ndeg * K)
-        obs_len = int(1 + buf_len + residual)
-        splits = [1, buf_len] + ([residual] if residual > 0 else [])
+        obs_len = int(2 + buf_len)
+        splits = [1, 1, buf_len]
         with tf.name_scope(f'neighbor_target_q_network_{neighbor}'):
                 self.neighbors_target_q_networks.append(q_func((obs_len,), 
                                                               ndeg,
@@ -143,9 +150,20 @@ class DQN_AGENT(tf.Module):
                                                                             splits))
 
     #@tf.function
-    def step(self, obs, stochastic=True, update_eps=-1, actions_probs=None):
+    def step(
+        self,
+        obs,
+        stochastic=True,
+        update_eps=-1,
+        actions_probs=None,
+        return_diagnostics=False,
+    ):
+        # Apply the epsilon requested for this decision, not the following one.
+        if update_eps >= 0:
+            self.eps.assign(update_eps)
         q_values = self.q_network(obs)
         deterministic_actions = tf.argmax(q_values, axis=1)
+        choose_random = tf.zeros_like(deterministic_actions, dtype=tf.bool)
         #deterministic_actions = tf.argmin(q_values, axis=1)
         if stochastic:
             batch_size = tf.shape(obs)[0]
@@ -158,8 +176,8 @@ class DQN_AGENT(tf.Module):
         else:
             output_actions = deterministic_actions
 
-        if update_eps >= 0:
-            self.eps.assign(update_eps)
+        if return_diagnostics:
+            return output_actions, deterministic_actions, choose_random, q_values
         return output_actions
       
     #@tf.function()
@@ -209,6 +227,35 @@ class DQN_AGENT(tf.Module):
         return td_error
 
     #tf.function(autograph=False)
+    def train_il(self, obs, ecmp_actions):
+        """[Design B 2026-05-14] Imitation Learning: 让 Q-network 模仿 ECMP 哈希策略
+
+        Loss: sparse cross-entropy with q_values as logits, ecmp_actions as labels.
+        效果：Q(s, ecmp_action) 被推高，Q(s, others) 被压低 → policy ≈ ECMP
+        Phase 1 训练完后，Q-network 等价于 ECMP，作为 RL phase 的初始化保底
+        """
+        with tf.GradientTape() as tape:
+            tape.watch(obs)
+            q_values = self.q_network(obs)  # (batch, num_actions)
+            # cross-entropy: 把 q_values 当 logits，ecmp_actions 当 labels
+            errors = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                labels=tf.cast(ecmp_actions, tf.int32),
+                logits=q_values
+            )
+            loss = tf.reduce_mean(errors)
+
+        grads = tape.gradient(loss, self.q_network.trainable_variables)
+        if self.grad_norm_clipping:
+            clipped_grads = []
+            for grad in grads:
+                if grad is not None:
+                    clipped_grads.append(tf.clip_by_norm(grad, self.grad_norm_clipping))
+                else:
+                    clipped_grads.append(grad)
+            grads = clipped_grads
+        self.optimizer.apply_gradients(zip(grads, self.q_network.trainable_variables))
+        return loss
+
     def update_target(self):
         """Update the target q network
         """

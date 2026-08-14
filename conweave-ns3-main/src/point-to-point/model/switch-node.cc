@@ -313,6 +313,54 @@ SwitchNode::TryConsumeRlPreferredOutIf(uint32_t dstTorId, uint32_t &outIfOut)
   return true;
 }
 
+// [Design A 2026-05-14] Per-flowKey 路由表实现
+// 目标：让同一 flowlet 内所有包都跟随首包走 RL 选的 port，消除 intra-flowlet reorder
+
+void
+SwitchNode::SetRlPreferredForFlow(uint64_t flowKey, uint32_t outIf)
+{
+  // 触发清理：若 map 太大，先扫描过期 entry
+  if (m_rlPrefByFlow.size() > kFlowletPrefSizeCap) {
+    CleanupExpiredFlowPref();
+  }
+  FlowletRoutePref pref;
+  pref.outIf = outIf;
+  pref.last_access_sec = Simulator::Now().GetSeconds();
+  m_rlPrefByFlow[flowKey] = pref;
+}
+
+bool
+SwitchNode::LookupRlPreferredForFlow(uint64_t flowKey, uint32_t &outIfOut)
+{
+  auto it = m_rlPrefByFlow.find(flowKey);
+  if (it == m_rlPrefByFlow.end()) return false;
+
+  double now = Simulator::Now().GetSeconds();
+  // 过期则清掉并 fallback
+  if (now - it->second.last_access_sec > kFlowletPrefTTL) {
+    m_rlPrefByFlow.erase(it);
+    return false;
+  }
+
+  // refresh-on-access：长 flowlet 持续访问会刷新 last_access_sec，不会被截断
+  it->second.last_access_sec = now;
+  outIfOut = it->second.outIf;
+  return true;
+}
+
+void
+SwitchNode::CleanupExpiredFlowPref()
+{
+  double now = Simulator::Now().GetSeconds();
+  for (auto it = m_rlPrefByFlow.begin(); it != m_rlPrefByFlow.end(); ) {
+    if (now - it->second.last_access_sec > kFlowletPrefTTL) {
+      it = m_rlPrefByFlow.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
 
 void SwitchNode::CheckAndSendPfc(uint32_t inDev, uint32_t qIndex) {
     Ptr<QbbNetDevice> device = DynamicCast<QbbNetDevice>(m_devices[inDev]);
@@ -409,16 +457,33 @@ uint32_t SwitchNode::DoLbRl(Ptr<Packet> p, CustomHeader &ch, const std::vector<i
         return DoLbFlowECMP(p, ch, nexthops);
     }
 
-    // 解析目的 ToR
+    // [Design A 2026-05-14] 优先：按 flowKey 查找 per-flow RL preference
+    // 与 conweave-obs-manager.cc 中 flowKey 计算保持完全一致
+    uint64_t flowKey = 0;
+    if (ch.udp.sport || ch.udp.dport) {
+      flowKey = ConWeaveRouting::GetFlowKey(ch.sip, ch.dip, ch.udp.sport, ch.udp.dport);
+    } else if (ch.tcp.sport || ch.tcp.dport) {
+      flowKey = ConWeaveRouting::GetFlowKey(ch.sip, ch.dip, ch.tcp.sport, ch.tcp.dport);
+    } else {
+      flowKey = ConWeaveRouting::GetFlowKey(ch.sip, ch.dip, 0, 0);
+    }
+    if (flowKey != 0) {
+      uint32_t rlOutIf = 0;
+      if (LookupRlPreferredForFlow(flowKey, rlOutIf) && rlOutIf > 0) {
+        return rlOutIf; // 命中 per-flow RL 选择（保证同 flowlet 内所有包路径一致）
+      }
+    }
+
+    // 兼容老接口：dstToR 一次性 RL 选择（实际已 dead，保留为防御）
     auto itTor = Settings::hostIp2SwitchId.find(ch.dip);
     if (itTor != Settings::hostIp2SwitchId.end()) {
         uint32_t dstToR = itTor->second;
         uint32_t rlOutIf = 0;
         if (TryConsumeRlPreferredOutIf(dstToR, rlOutIf) && rlOutIf > 0) {
-            return rlOutIf; // 命中一次性 RL 选择
+            return rlOutIf;
         }
     }
-    // 未命中：回退到 Flow ECMP（或可改为与原算法一致的回退）
+    // 未命中：回退到 Flow ECMP（同 flow 始终走同一 port，保证 baseline 行为）
     return DoLbFlowECMP(p, ch, nexthops);
 }
 

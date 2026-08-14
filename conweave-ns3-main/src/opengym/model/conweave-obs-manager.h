@@ -12,6 +12,7 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <array>
 #include <string>
 #include <fstream>
@@ -32,8 +33,10 @@ public:
   ConweaveObsManager () {}
   virtual ~ConweaveObsManager ();
 
-  // 每个出口的观测特征维度（cost_bytes, ce_local, ce_remote_min, queueDeriv, cov）
-  static constexpr uint32_t kFeatsPerEgress = 5;
+  // Each egress is described only by statistics maintained by the RL path:
+  // instantaneous queue, queue EMA, DRE utilization, queue trend,
+  // capacity-aware headroom, and relative link capacity.
+  static constexpr uint32_t kFeatsPerEgress = 6;
   // 观测维度：[dstOverlay, lastAction] + N_neighbors * kFeatsPerEgress
   static constexpr uint32_t kObsHeaderDims = 2;
 
@@ -66,7 +69,6 @@ public:
   // 清空本次逐跳缓存（动作后调用，防止 post-action 的下一状态复用旧 pkt）
   void ResetPreparedObservation();
 
-  std::vector<float> BuildObservation(int currentDstOverlay) const;
   double GetObsUpperBound() const { return m_upperBound; }
   float GetReward();
   bool  ApplyAction(uint32_t actionId, int dstOverlay);
@@ -223,7 +225,6 @@ private:
     uint64_t bytes = 0;      // accumulated acknowledged bytes in window
     uint32_t acks = 0;       // ack count
     uint32_t dupacks = 0;    // duplicate ack count
-    uint64_t lastAckNo = 0;  // last seen ack sequence number
     double   emaT = 0.0;     // EMA of normalized throughput [0,1]
     double   emaDup = 0.0;   // EMA of dup fraction [0,1]
     double   lastAckTs = 0.0; // last ack timestamp (Simulator::Now)
@@ -269,17 +270,23 @@ private:
   // C) 调参：缩短窗口，加快反馈
   double m_rewardWinSec = 40e-6; // 约5个RTT
   double m_rttGuessSec = 8.32e-6; // 8.32us, for BDP estimation
+  // Time-based queue EMA avoids giving faster links a different smoothing
+  // constant merely because their MacTx callback fires more often.
+  double m_queueEmaTau = 100e-6;
   double m_rewardMinSpanSec = 0; //不再使用
   // C) 调参：字节触发阈值与BDP对齐
   uint64_t m_rewardByteMin = 8 * 1024; // 8KB (approx 1 BDP)
   // Queue score reference scale: max(alpha*BDP, beta*BufferCap), with floor
-  double m_queueRefAlphaBdp = 4.0;
-  double m_queueRefBetaBuf = 0.1;
-  double m_queueRefMinBytes = 32.0 * 1024;
+  // [Bug #6 Fix 2026-05-13] qRef 之前是 max(4×BDP, 0.1×totalBuffer=5MB, 32K)=5MB
+  // 队列要堆到 5MB 才能让 qSmooth 跌——根本不可能 → qSmooth 永远 ≈ 1（30% 权重沉默）
+  // 修复：让 qRef ≈ 16KB（≈3 个 BDP），队列 10K-100K 范围内 qScore 才有明显差距
+  double m_queueRefAlphaBdp = 1.0;     // 4.0 → 1.0
+  double m_queueRefBetaBuf = 0.001;    // 0.1 → 0.001（基本禁用 totalBuffer-based 项）
+  double m_queueRefMinBytes = 16.0 * 1024;  // 32K → 16K
   // Low-pass factor for queue score smoothing
   // 调稳：队列平滑系数减小（慢一点）
   double m_qSmoothLambda = 0.1;
-  double m_rewardAlpha = 0.7; // r = 0.3*r_inst + 0.7*r_prev
+  double m_rewardAlpha = 0.7; // r = 0.7*r_inst + 0.3*r_prev
 
   double m_winStartSec = 0.0;
   double m_lastRewardTimeSec = 0.0;
@@ -296,11 +303,21 @@ private:
   double MapQueueToScoreAcc(double L, const std::array<double,10>& E);
   std::array<double,10> BuildQueueStepsBDP(double bwBps, double rttSec);
   double ResolveLinkBandwidthBps(uint32_t outIf);
+  void UpdateQueueStats(uint32_t outIf, double nowSec);
+  double DecayAndGetDreUtilization(uint32_t outIf, double nowSec);
+  double QueueReferenceBytes(const EgressPortStats& st) const;
+  double QueueTrendNormalized(const EgressPortStats& st) const;
   double ComputeReward();
 
 private:
+  // [Design B 2026-05-14] Warm-start IL helper: 计算 held packet 的 ECMP target action
+  uint32_t ComputeEcmpActionForHeldPacket() const;
+
   // H1: RL决策覆盖率探针 (Ad-hoc)
   std::unordered_map<uint64_t, uint32_t> m_decisionByUid;
+  // [Hold-only 2026-05-13] 记录由本 switch 的 RL agent 决策过路径的包 UID。
+  // OnMacTx 中只对这些 UID 累加 dre_bytes，让 T_port 反映 Agent 自己的决策后果。
+  std::unordered_set<uint64_t> m_rlHeldUids;
   uint64_t m_decChosen{0}, m_decMatch{0}, m_decMismatch{0};
 
   // H3: 长环路采样探针
@@ -332,7 +349,10 @@ private:
   };
   std::unordered_map<uint64_t, FlowletCtx> m_flowlets; // flowKey -> ctx
   double m_flowletGapSec = 20e-6;    // flowlet的gap阈值，RTT的一半较为合适，config中看maxRTT
-  double m_minDwellSec   = 1.5e-3;   // 最小驻留时间 1.5ms，防止路由暴切引发微突发
+  // A flowlet boundary is already the safe switching boundary.  The former
+  // 1.5 ms lock was 75x the 20 us gap and suppressed more than 90% of Agent
+  // decisions, so v8 deliberately applies no additional dwell lock.
+  double m_minDwellSec   = 0.0;
   uint64_t m_flowletKeyHeld = 0;     // flowKey for the currently suspended first packet
 
   // ==== Reward CSV logging ====

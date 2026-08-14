@@ -12,6 +12,13 @@ __copyright__ = "Copyright (c) 2022 Redha A. Alliche, Tiago Da Silva Barros, Ram
 __version__ = "0.1.0"
 __email__ = "alliche,raparicio,sassatelli@i3s.unice.fr, tiago.da-silva-barros@inria.fr"
 
+
+def _safe_ratio(numerator, denominator):
+    """Return a finite rate when a legacy counter has no observations."""
+    if denominator <= 0:
+        return 0.0
+    return float(numerator) / float(denominator)
+
 def custom_plots():
     
     """define the costum plots for tensorboard
@@ -179,7 +186,7 @@ def stats_writer_test(summary_writer_results_path, Agent):
         tf.summary.scalar(f'test_overlay_arrived_pkts', Agent.sim_delivered_packets, step=int(Agent.load_factor*100))
         tf.summary.scalar(f'test_global_e2e_delay', Agent.sim_avg_e2e_delay, step=int(Agent.load_factor*100))
         tf.summary.scalar(f'test_overlay_e2e_delay', Agent.sim_global_avg_e2e_delay, step=int(Agent.load_factor*100))
-        tf.summary.scalar(f'test_global_loss_rate', Agent.sim_global_dropped_packets/Agent.sim_global_injected_packets, step=int(Agent.load_factor*100))
-        tf.summary.scalar(f'test_overlay_loss_rate', Agent.sim_dropped_packets/Agent.sim_injected_packets, step=int(Agent.load_factor*100))
+        tf.summary.scalar(f'test_global_loss_rate', _safe_ratio(Agent.sim_global_dropped_packets, Agent.sim_global_injected_packets), step=int(Agent.load_factor*100))
+        tf.summary.scalar(f'test_overlay_loss_rate', _safe_ratio(Agent.sim_dropped_packets, Agent.sim_injected_packets), step=int(Agent.load_factor*100))
         tf.summary.scalar(f'test_global_cost', Agent.sim_global_cost, step=int(Agent.load_factor*100))
         tf.summary.scalar(f'test_overlay_cost', Agent.sim_cost, step=int(Agent.load_factor*100))

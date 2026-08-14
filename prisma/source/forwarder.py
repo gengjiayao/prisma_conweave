@@ -4,7 +4,16 @@ import networkx as nx
 import numpy as np
 from ns3_model import ns3env
 from source.learner import DQN_AGENT
-from source.utils import load_model, LinearSchedule, optimal_routing_decision, normalize_obs
+from source.utils import load_model, LinearSchedule, optimal_routing_decision
+from source.rl_contract import (
+    EGRESS_FEATURE_NAMES,
+    RL_CORE_VERSION,
+    build_aligned_transition,
+    is_valid_environment_step,
+    native_action_prior,
+    preprocess_observation,
+    validate_observation_shape,
+)
 from source.models import *
 import operator
 import pandas as pd
@@ -49,10 +58,12 @@ class Forwarder(Agent):
         obs = self.env.reset()
         Agent.envs[self.index] = self.env
         self.obs_dim = int(self.env.observation_space.shape[0])
+        validate_observation_shape(self.obs_dim, int(self.env.action_space.n))
 
         # 首拍默认无控制包，pkt_id 置为 -1，防止首拍未初始化访问
         self.signaling = False
         self.pkt_id = -1
+        self.ecmp_action = -1
         if init:
             ## define the agent
             if self.agent_type == "dqn_buffer":
@@ -131,10 +142,17 @@ class Forwarder(Agent):
             ## load the models
             if Agent.load_path is not None and "dqn" in self.agent_type:
                 # load the model
-                loaded_models = load_model(Agent.load_path, self.index)
+                loaded_models = load_model(
+                    Agent.load_path,
+                    self.index,
+                    expected_contract_version=RL_CORE_VERSION,
+                )
                 if loaded_models is not None:
                     print("Restoring from {} for node {}".format(Agent.load_path, self.index))
+                    if self.index >= len(loaded_models) or loaded_models[self.index] is None:
+                        raise ValueError(f"Checkpoint is missing node {self.index}")
                     Agent.agents[self.index].q_network.set_weights(loaded_models[self.index].get_weights())
+                    Agent.agents[self.index].update_target()
         
             ## define the log file for exploration value
             self.tb_writer_dict = {"exploration":  tf.summary.create_file_writer(logdir=f'{Agent.logs_folder}/exploration/node_{self.index}')}
@@ -151,10 +169,6 @@ class Forwarder(Agent):
             self.r_alpha = getattr(Agent, "reward_ewma_alpha", 0.05)
             self.r_ewma  = 0.0
         
-        # 初始化每节点的 pending 容器（用于本地闭环）
-        if not hasattr(Agent, "pending"):
-            Agent.pending = {}
-
         # 默认的调试/写频参数（已存在则不覆盖）
         if not hasattr(Agent, "reward_log_every"):
             Agent.reward_log_every = 1000
@@ -173,6 +187,45 @@ class Forwarder(Agent):
         ## define action history and nb_actions
         self.action_history = np.ones(self.env.action_space.n)
         self.nb_actions = np.sum(self.action_history)
+        # Exact counts for real routing decisions (no pseudocounts).
+        self.policy_action_counts = np.zeros(self.env.action_space.n, dtype=np.int64)
+        self.greedy_action_counts = np.zeros(self.env.action_space.n, dtype=np.int64)
+        self.policy_decision_count = 0
+        self.random_action_decisions = 0
+        self.greedy_action_decisions = 0
+        self.behavior_matches_greedy = 0
+        self.epsilon_sum = 0.0
+        self.epsilon_min = None
+        self.epsilon_max = None
+        self.transitions_written = 0
+        self.action_sequence_mismatches = 0
+        self.first_action_seq = None
+        self.last_action_seq = None
+        self.observation_stat_names = [
+            "destination_overlay",
+            "last_action",
+            *EGRESS_FEATURE_NAMES,
+        ]
+        stat_dim = len(self.observation_stat_names)
+        self.raw_observation_min = np.full(stat_dim, np.inf, dtype=np.float64)
+        self.raw_observation_max = np.full(stat_dim, -np.inf, dtype=np.float64)
+        self.raw_observation_sum = np.zeros(stat_dim, dtype=np.float64)
+        self.raw_observation_count = np.zeros(stat_dim, dtype=np.int64)
+        self.processed_observation_min = np.full(stat_dim, np.inf, dtype=np.float64)
+        self.processed_observation_max = np.full(stat_dim, -np.inf, dtype=np.float64)
+        self.processed_observation_sum = np.zeros(stat_dim, dtype=np.float64)
+        self.processed_observation_count = np.zeros(stat_dim, dtype=np.int64)
+        self.reward_action_count = np.zeros(self.env.action_space.n, dtype=np.int64)
+        self.reward_action_sum = np.zeros(self.env.action_space.n, dtype=np.float64)
+        self.reward_action_sum_sq = np.zeros(self.env.action_space.n, dtype=np.float64)
+        self.q_value_count = 0
+        self.q_value_min = np.inf
+        self.q_value_max = -np.inf
+        self.q_value_sum = 0.0
+        self.q_value_sum_sq = 0.0
+        self.q_margin_min = np.inf
+        self.q_margin_max = -np.inf
+        self.q_margin_sum = 0.0
         # Create the schedule for exploration (allow explicit decay length).
         schedule_steps = int(Agent.iterationNum)
         if getattr(Agent, "exploration_schedule_timesteps", 0) > 0:
@@ -182,6 +235,136 @@ class Forwarder(Agent):
                                     initial_p=Agent.exploration_initial_eps,
                                     final_p=Agent.exploration_final_eps)
 
+    def _observation_groups(self, observation):
+        values = np.asarray(observation, dtype=np.float64).reshape(-1)
+        num_actions = int(self.env.action_space.n)
+        feature_count = (values.size - 2) // num_actions
+        ports = values[2:].reshape(num_actions, feature_count)
+        return [values[0:1], values[1:2]] + [ports[:, i] for i in range(feature_count)]
+
+    def _record_observation(self, raw_observation, processed_observation):
+        for groups, mins, maxes, sums, counts in (
+            (
+                self._observation_groups(raw_observation),
+                self.raw_observation_min,
+                self.raw_observation_max,
+                self.raw_observation_sum,
+                self.raw_observation_count,
+            ),
+            (
+                self._observation_groups(processed_observation),
+                self.processed_observation_min,
+                self.processed_observation_max,
+                self.processed_observation_sum,
+                self.processed_observation_count,
+            ),
+        ):
+            for index, group in enumerate(groups):
+                mins[index] = min(mins[index], float(np.min(group)))
+                maxes[index] = max(maxes[index], float(np.max(group)))
+                sums[index] += float(np.sum(group))
+                counts[index] += int(group.size)
+
+    def _record_q_values(self, q_values):
+        values = np.asarray(q_values, dtype=np.float64).reshape(-1)
+        self.q_value_count += int(values.size)
+        self.q_value_min = min(self.q_value_min, float(np.min(values)))
+        self.q_value_max = max(self.q_value_max, float(np.max(values)))
+        self.q_value_sum += float(np.sum(values))
+        self.q_value_sum_sq += float(np.sum(values * values))
+        if values.size >= 2:
+            top_two = np.partition(values, -2)[-2:]
+            margin = float(np.max(top_two) - np.min(top_two))
+            self.q_margin_min = min(self.q_margin_min, margin)
+            self.q_margin_max = max(self.q_margin_max, margin)
+            self.q_margin_sum += margin
+
+    def _record_action_reward(self, action, reward):
+        action = int(action)
+        reward = float(reward)
+        self.reward_action_count[action] += 1
+        self.reward_action_sum[action] += reward
+        self.reward_action_sum_sq[action] += reward * reward
+
+    @staticmethod
+    def _moments(count, total, total_sq):
+        if int(count) <= 0:
+            return {"count": 0, "mean": None, "std": None}
+        mean = float(total / count)
+        variance = max(0.0, float(total_sq / count) - mean * mean)
+        return {"count": int(count), "mean": mean, "std": float(np.sqrt(variance))}
+
+    def observation_diagnostics(self):
+        result = {}
+        for index, name in enumerate(self.observation_stat_names):
+            result[name] = {
+                "raw": {
+                    "count": int(self.raw_observation_count[index]),
+                    "min": (
+                        float(self.raw_observation_min[index])
+                        if self.raw_observation_count[index] else None
+                    ),
+                    "max": (
+                        float(self.raw_observation_max[index])
+                        if self.raw_observation_count[index] else None
+                    ),
+                    "mean": (
+                        float(self.raw_observation_sum[index] / self.raw_observation_count[index])
+                        if self.raw_observation_count[index] else None
+                    ),
+                },
+                "processed": {
+                    "count": int(self.processed_observation_count[index]),
+                    "min": (
+                        float(self.processed_observation_min[index])
+                        if self.processed_observation_count[index] else None
+                    ),
+                    "max": (
+                        float(self.processed_observation_max[index])
+                        if self.processed_observation_count[index] else None
+                    ),
+                    "mean": (
+                        float(self.processed_observation_sum[index] / self.processed_observation_count[index])
+                        if self.processed_observation_count[index] else None
+                    ),
+                },
+            }
+        return result
+
+    def reward_diagnostics(self):
+        return {
+            str(action): self._moments(
+                self.reward_action_count[action],
+                self.reward_action_sum[action],
+                self.reward_action_sum_sq[action],
+            )
+            for action in range(int(self.env.action_space.n))
+        }
+
+    def q_diagnostics(self):
+        if self.q_value_count <= 0:
+            return {"count": 0}
+        moments = self._moments(
+            self.q_value_count,
+            self.q_value_sum,
+            self.q_value_sum_sq,
+        )
+        decision_count = int(self.policy_decision_count)
+        moments.update({
+            "min": float(self.q_value_min),
+            "max": float(self.q_value_max),
+            "top2_margin_mean": (
+                float(self.q_margin_sum / decision_count) if decision_count else None
+            ),
+            "top2_margin_min": (
+                float(self.q_margin_min) if decision_count else None
+            ),
+            "top2_margin_max": (
+                float(self.q_margin_max) if decision_count else None
+            ),
+        })
+        return moments
+
   
 
     def step(self, obs):
@@ -189,14 +372,6 @@ class Forwarder(Agent):
         Do an env step
         
         """
-        ## schedule the exploration
-        if self.train:
-            self.update_eps = tf.constant(self.exploration.value(self.transition_number))
-            ## log the exploration value
-            with self.tb_writer_dict["exploration"].as_default():
-                tf.summary.scalar('exploaration_value_over_steps', self.update_eps, step=self.transition_number)
-                tf.summary.scalar('exploaration_value_over_time', self.update_eps, step=int((Agent.base_curr_time + Agent.curr_time)*1e6))
-
         ## take the action
         if obs[0] == self.index or self.transition_number < 1 or obs[0] in(-1, 1000): # pkt arrived to dst or it is a train step, ignore the action
             self.action = 0
@@ -270,12 +445,68 @@ class Forwarder(Agent):
                 actions_probs = 1-(self.action_history/self.nb_actions)
                 actions_probs /=sum(actions_probs)
             ### Take action using the NN
-            obs_in = normalize_obs(np.array([obs], dtype=float))
-            
-            action = Agent.agents[self.index].step(obs_in,
-                                                   self.train,
-                                                   self.update_eps,
-                                                   actions_probs=actions_probs).numpy().item()
+            obs_in = preprocess_observation(
+                np.array([obs], dtype=np.float32),
+                num_actions=int(self.env.action_space.n),
+            )
+            self._record_observation(obs, obs_in[0])
+            eval_epsilon = float(getattr(Agent, "eval_epsilon", 0.0))
+            stochastic = bool(self.train or eval_epsilon > 0.0)
+            update_eps = (
+                float(self.exploration.value(self.policy_decision_count))
+                if self.train
+                else eval_epsilon
+            )
+            self.update_eps = update_eps
+            if self.train:
+                with self.tb_writer_dict["exploration"].as_default():
+                    tf.summary.scalar(
+                        'exploration_value_over_decisions',
+                        update_eps,
+                        step=self.policy_decision_count,
+                    )
+                    tf.summary.scalar(
+                        'exploration_value_over_time',
+                        update_eps,
+                        step=int((Agent.base_curr_time + Agent.curr_time) * 1e6),
+                    )
+            if bool(getattr(Agent, "eval_prior_only", False)):
+                if self.train or update_eps != 0.0:
+                    raise RuntimeError(
+                        "Prior-only policy is valid only for deterministic frozen evaluation"
+                    )
+                q_values_array = native_action_prior(
+                    obs_in,
+                    num_actions=int(self.env.action_space.n),
+                )
+                action = int(np.argmax(q_values_array[0]))
+                greedy_action = action
+                used_random = False
+            else:
+                action_tensor, greedy_tensor, random_tensor, q_values = Agent.agents[self.index].step(
+                    obs_in,
+                    stochastic,
+                    update_eps,
+                    actions_probs=actions_probs,
+                    return_diagnostics=True,
+                )
+                q_values_array = q_values.numpy()
+                action = int(action_tensor.numpy().item())
+                greedy_action = int(greedy_tensor.numpy().item())
+                used_random = bool(random_tensor.numpy().item())
+            self._record_q_values(q_values_array)
+            self.policy_action_counts[action] += 1
+            self.greedy_action_counts[greedy_action] += 1
+            self.policy_decision_count += 1
+            self.epsilon_sum += update_eps
+            self.epsilon_min = update_eps if self.epsilon_min is None else min(self.epsilon_min, update_eps)
+            self.epsilon_max = update_eps if self.epsilon_max is None else max(self.epsilon_max, update_eps)
+            if used_random:
+                self.random_action_decisions += 1
+            else:
+                self.greedy_action_decisions += 1
+            if action == greedy_action:
+                self.behavior_matches_greedy += 1
             if Agent.smart_exploration:
                 self.action_history[action] += 1
                 self.nb_actions += 1
@@ -350,7 +581,12 @@ class Forwarder(Agent):
         except Exception:
             pkt_type = 2
         self.pkt_type = pkt_type
-        self.signaling = pkt_type != 0 
+        self.signaling = pkt_type != 0
+        # [Design B 2026-05-14] Warm-start IL: 从 info 解析 ECMP target action
+        try:
+            self.ecmp_action = int(kv.get("ecmp_action", -1))
+        except Exception:
+            self.ecmp_action = -1
         if(pkt_type==0): # data packet
             # treat lost packets
             lost_raw = kv.get("lost_packets_id", kv.get("Packet Lost"))
@@ -459,10 +695,21 @@ class Forwarder(Agent):
                 if(not self.env.connected):
                     break
                 prev_obs = obs
+                # The ECMP label belongs to prev_obs. treat_info() below parses
+                # the label for the newly returned observation, so capture it
+                # before env.step() advances the protocol.
+                ecmp_action_for_step = int(getattr(self, "ecmp_action", -1))
+                pkt_id_for_step = int(getattr(self, "pkt_id", -1))
+                signaling_for_step = bool(getattr(self, "signaling", False))
                 obs, r_env, done_flag, info = self.step(prev_obs)
+                action_for_step = int(self.action)
                 is_ctrl = self.treat_info(info)
                 action_applied = getattr(self, "action_applied", True)
-                valid_step = (not is_ctrl) and action_applied
+                valid_step = is_valid_environment_step(
+                    self.env.connected,
+                    is_ctrl,
+                    action_applied,
+                )
                 pkt_done = bool(done_flag)
                 will_reach_max = (
                     Agent.max_nb_arrived_pkts > 0
@@ -508,62 +755,71 @@ class Forwarder(Agent):
                 if Agent.signaling_type in ("NN", "target") and Agent.signalingSim == 0:
                     self._get_upcoming_events()
 
-                # —— 本地闭环：仅对有效 step 关闭上一拍 (s_{t-1}, a_{t-1}) ——
-                # 【关键修复 v4】：恢复正常 TD Learning
-                #
-                # 诊断结论：
-                # - pending 是基于节点 ID (self.index) 存取的，取出的实际上是该节点自身的连续状态转移
-                # - 这在宏观上是合法的局部 MDP，不需要做 same_node 过滤
-                # - 之前强制 done=True 导致 Agent 退化为 Contextual Bandit，丧失远见能力
-                # - Loss 爆炸的真正元凶是：高噪声环境下缺失 Target Q 裁剪和 MSE Loss
-                #
-                # 修复策略：
-                # - 恢复正常的 done_for_buffer = pkt_done
-                # - 让所有数据正常流入 Buffer
-                # - 依靠 trainer.py 中的 Q 值裁剪和 learner.py 中的 Huber Loss 防止爆炸
-                #
-                had_pending = (self.index in Agent.pending)
+                # env.step(a_t) sends a_t and then receives (s_{t+1}, r_{t+1}).
+                # Store that transition immediately.  The former pending path
+                # delayed it by one extra env.step and paired rewards/states
+                # with the wrong action.
                 wrote_transition = False
+                decision_state = not (
+                    prev_obs[0] == self.index or prev_obs[0] in (-1, 1000)
+                )
                 if valid_step:
-                    pend = Agent.pending.pop(self.index, None)
-                    wrote_transition = (pend is not None)
-                    if pend is not None:
-                        # 直接使用原始观测和 done 标志，不做任何过滤
-                        next_obs_for_buffer = np.array(obs, dtype=float).squeeze()
-                        done_for_buffer = pkt_done  # 恢复正常的 done 标志
-                        
-                        if Agent.signaling_type == "ideal":
-                            Agent.replay_buffer[self.index].add(
-                                pend["obs"],
-                                pend["action"],
-                                float(r_env),
-                                next_obs_for_buffer,
-                                done_for_buffer,
-                            )
-                            wrote_transition = True
-                        elif Agent.signaling_type == "NN":
-                            self._push_upcoming_event(self.index, {
-                                "time": Agent.curr_time + self.small_signaling_delay,
-                                "obs": pend["obs"],
-                                "action": pend["action"],
-                                "reward": float(r_env),
-                                "new_obs": next_obs_for_buffer,
-                                "flag": done_for_buffer,
-                                "pkt_id": getattr(self, "pkt_id", -1),
-                            })
-                            if Agent.signalingSim == 0 and self.train:
-                                Agent.small_signaling_overhead_counter += self.small_signaling_pkt_size
-                                Agent.small_signaling_pkt_counter += 1
-                            wrote_transition = True
-                        elif Agent.signaling_type == "target":
-                            pass
+                    action_seq = getattr(self, "action_seq", None)
+                    if action_seq is None:
+                        self.action_sequence_mismatches += 1
+                    else:
+                        action_seq = int(action_seq)
+                        if self.first_action_seq is None:
+                            self.first_action_seq = action_seq
+                        if self.last_action_seq is not None and action_seq != self.last_action_seq + 1:
+                            self.action_sequence_mismatches += 1
+                        self.last_action_seq = action_seq
 
-                        try:
-                            Agent.agents[self.index].update_num_taken_actions(
-                                pend["action"], pend.get("next_hop_degree", 1)
+                if valid_step and decision_state:
+                    transition = build_aligned_transition(
+                        prev_obs,
+                        action_for_step,
+                        r_env,
+                        obs,
+                        done_flag,
+                        ecmp_action=ecmp_action_for_step,
+                        num_actions=int(self.env.action_space.n),
+                    )
+                    self._record_action_reward(
+                        transition.action,
+                        transition.reward,
+                    )
+                    if Agent.signaling_type == "ideal":
+                        if Agent.prioritizedReplayBuffer:
+                            Agent.replay_buffer[self.index].add(
+                                transition.observation,
+                                transition.action,
+                                transition.reward,
+                                transition.next_observation,
+                                transition.done,
+                                Agent.replay_buffer[self.index].latest_gradient_step[transition.action],
                             )
-                        except Exception:
-                            pass
+                        else:
+                            Agent.replay_buffer[self.index].add(*transition)
+                        wrote_transition = True
+                    elif Agent.signaling_type == "NN":
+                        self._push_upcoming_event(self.index, {
+                            "time": Agent.curr_time + self.small_signaling_delay,
+                            "obs": transition.observation,
+                            "action": transition.action,
+                            "reward": transition.reward,
+                            "new_obs": transition.next_observation,
+                            "flag": transition.done,
+                            "pkt_id": getattr(self, "pkt_id", -1),
+                        })
+                        if Agent.signalingSim == 0 and self.train:
+                            Agent.small_signaling_overhead_counter += self.small_signaling_pkt_size
+                            Agent.small_signaling_pkt_counter += 1
+                        wrote_transition = True
+                    elif Agent.signaling_type == "target":
+                        pass
+                    if wrote_transition:
+                        self.transitions_written += 1
 
                 # —— 调试打印：收到/写入的 reward 与 temp_obs 规模 ——
                 if getattr(Agent, "debug_reward", False) and (
@@ -571,7 +827,7 @@ class Forwarder(Agent):
                 ):
                     try:
                         buffer_size = Agent.replay_buffer[self.index].__len__() if hasattr(Agent.replay_buffer[self.index], '__len__') else -1
-                        print(f"[DBG][node {self.index}] step={Agent.total_nb_iterations} r_env={float(r_env):.6f} had_pending={had_pending} wrote_transition={wrote_transition} temp_obs_size={len(Agent.temp_obs)} eps={self.update_eps:.4f} buf_size={buffer_size}")
+                        print(f"[DBG][node {self.index}] step={Agent.total_nb_iterations} r_env={float(r_env):.6f} wrote_transition={wrote_transition} temp_obs_size={len(Agent.temp_obs)} eps={self.update_eps:.4f} buf_size={buffer_size}")
                     except Exception:
                         pass
                 if getattr(Agent, "action_seq_log_every", 10000) > 0 and (
@@ -584,7 +840,7 @@ class Forwarder(Agent):
                             f"[SEQ][node {self.index}] step={Agent.total_nb_iterations} "
                             f"action_seq={action_seq} action_applied={action_applied} "
                             f"pkt_id={getattr(self, 'pkt_id', -1)} pkt_type={pkt_type} "
-                            f"valid_step={valid_step} had_pending={had_pending} wrote_transition={wrote_transition}"
+                            f"valid_step={valid_step} wrote_transition={wrote_transition}"
                         )
                     except Exception:
                         pass
@@ -595,20 +851,6 @@ class Forwarder(Agent):
                             print("Done by max number of arrived pkts")
                         break
                     continue # if it is a control/no-op step, continue
-
-                # —— 登记本拍 (s_t=prev_obs, a_t=self.action)，待下一拍 r_{t+1} 来闭环 ——
-                # 【修复】添加 node 字段，记录发起决策的节点，用于检测跨节点样本
-                if valid_step and not (getattr(self, "signaling", False) or prev_obs[0] == self.index or prev_obs[0] in (-1, 1000)):
-                    try:
-                        next_hop_degree = len(list(Agent.G.neighbors(self.neighbors[self.action]))) if Agent.G is not None else 1
-                    except Exception:
-                        next_hop_degree = len(list(Agent.G.neighbors(self.index))) if Agent.G is not None else 1
-                    Agent.pending[self.index] = {
-                        "obs": np.array(prev_obs, dtype=float).squeeze(),
-                        "action": int(self.action),
-                        "next_hop_degree": next_hop_degree,
-                        "node": self.index,  # 【关键】记录发起决策的节点
-                    }
 
                 Agent.nb_transitions += 1
                 is_new_pkt = self.pkt_id not in Agent.pkt_tracking_dict
@@ -621,29 +863,41 @@ class Forwarder(Agent):
                     self.handle_done()
 
                 if episode_done:
-                    Agent.pending.pop(self.index, None)
                     if will_reach_max:
                         print("Done by max number of arrived pkts")
                     break
 
                 if valid_step and (not pkt_done) and not (
-                    prev_obs[0] == self.index or prev_obs[0] in (-1, 1000) or getattr(self, "signaling", False)
+                    prev_obs[0] == self.index or prev_obs[0] in (-1, 1000) or signaling_for_step
                 ):
                     try:
                         nh_deg = len(list(Agent.G.neighbors(self.neighbors[self.action]))) if Agent.G is not None else 1
                     except Exception:
                         nh_deg = 1
-                    track = Agent.pkt_tracking_dict.get(int(self.pkt_id), {"src": self.index, "dst": int(obs[0])})
-                    Agent.temp_obs[int(self.pkt_id)] = {
+                    track = Agent.pkt_tracking_dict.get(pkt_id_for_step, {"src": self.index, "dst": int(prev_obs[0])})
+                    Agent.temp_obs[pkt_id_for_step] = {
                         "node": self.index,
                         "obs": np.array(prev_obs, dtype=float).squeeze(),
                         "action": int(self.action),
                         "time": Agent.curr_time,
                         "src": track.get("src", self.index),
-                        "dst": track.get("dst", int(obs[0])),
+                        "dst": track.get("dst", int(prev_obs[0])),
                         "next_hop_degree": int(nh_deg),
                     }
             break
+        action_total = int(np.sum(self.policy_action_counts))
+        action_ratios = (
+            (self.policy_action_counts / action_total).tolist()
+            if action_total > 0
+            else np.zeros_like(self.policy_action_counts, dtype=float).tolist()
+        )
+        print(
+            f"[POLICY-ACTIONS] node={self.index} total={action_total} "
+            f"counts={self.policy_action_counts.tolist()} ratios={action_ratios} "
+            f"shadow_greedy_counts={self.greedy_action_counts.tolist()} "
+            f"random={self.random_action_decisions} greedy={self.greedy_action_decisions} "
+            f"eval_epsilon={float(getattr(Agent, 'eval_epsilon', 0.0))} train={int(bool(self.train))}"
+        )
         ## close the zmq bridge
         self.env.ns3ZmqBridge.send_close_command()
         return True

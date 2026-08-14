@@ -34,7 +34,13 @@ def parse_arguments():
     group1.add_argument('--numEpisodes', type=int, help='Number of episodes', default=1)
     group1.add_argument('--simTime', type=int, help='Simulation duration in seconds', default=5)
     group1.add_argument('--basePort', type=int, help='Starting port number', default=6555)
-    group1.add_argument('--seed', type=int, help='Random seed used for the simulation', default=100)
+    group1.add_argument('--seed', type=int, help='Shared Python, TensorFlow and ns-3 random seed', default=100)
+    group1.add_argument(
+        '--traffic_seed',
+        type=int,
+        help='Independent CDF traffic-generation seed; omit to reuse the legacy traffic filename',
+        default=None,
+    )
     group1.add_argument('--train', type=int, help='If 1, train the model.Else, test it', default=1)
     group1.add_argument('--max_nb_arrived_pkts', type=int, help='If < 0, stops the episode at the provided number of arrived packets', default=-1)
     group1.add_argument('--ns3_sim_path', type=str, help='Path to the ns3 simulator of conweave folder', default="../conweave-ns3-main/") ## 直接复用，不再新增
@@ -77,8 +83,33 @@ def parse_arguments():
     group3.add_argument('--prioritizedReplayBuffer', type=int, help='if true, use prioritized replay buffer using the gradient step as weights (used when training)', default=0)
     group3.add_argument('--smart_exploration', type=int, help='if true, explore using probability proportional to the inverse of the number of time the action was taken (used when training and exploration enabled)', default=0)
     group3.add_argument('--batch_size', type=int, help='Size of a batch (used when training)', default=256)
-    group3.add_argument('--gamma', type=float, help='Gamma ratio for RL (used when training)', default=1)
+    # [Bug #9 Fix 2026-05-13] default=1 (无折扣) 会让 Q 值无界发散；改为 0.9 标准 DQN
+    group3.add_argument('--gamma', type=float, help='Gamma ratio for RL (used when training)', default=0.9)
     group3.add_argument('--iterationNum', type=int, help='Max iteration number for exploration (used when training)', default=100000)
+    group3.add_argument(
+        '--il_phase_steps',
+        type=int,
+        help='Deprecated and disabled: ECMP hash labels require flow identity that is not present in the RL observation',
+        default=0,
+    )
+    group3.add_argument(
+        '--learning_starts',
+        type=int,
+        help='Per-node replay samples required before the first DQN update',
+        default=256,
+    )
+    group3.add_argument(
+        '--train_every',
+        type=int,
+        help='Run one DQN update per this many new replay samples, independently for each node',
+        default=4,
+    )
+    group3.add_argument(
+        '--target_update_interval',
+        type=int,
+        help='Hard-update the DQN target network every N gradient steps per node',
+        default=100,
+    )
     group3.add_argument('--exploration_schedule_timesteps', type=int, 
                         help='Number of steps to decay epsilon from initial to final. If 0, use iterationNum.', 
                         default=8000) 
@@ -86,11 +117,23 @@ def parse_arguments():
     #group3.add_argument('--exploration_initial_eps', type=float, help='Exploration intial value (used when training)', default=1.0)
     group3.add_argument('--exploration_initial_eps', type=float, help='Exploration intial value (used when training)', default=1.0)
     group3.add_argument('--exploration_final_eps', type=float, help='Exploration final value (used when training)', default=0.1)
+    group3.add_argument('--eval_epsilon', type=float,
+                        help='Fixed epsilon used only for frozen evaluation (train=0); 0 keeps greedy inference',
+                        default=0.0)
+    group3.add_argument(
+        '--eval_prior_only',
+        type=int,
+        help='Frozen-evaluation ablation: choose the rl-core-v8 native prior and ignore the learned residual',
+        default=0,
+    )
     group3.add_argument('--load_path', type=str, help='Path to DQN models, if not None, loads the models from the given files', default=None)
     group3.add_argument('--save_models', type=int, help='if True, store the models at the end of the training', default=1)
     group3.add_argument('--snapshot_interval', type=int, help='Number of seconds between each snapshot of the models. If 0, desactivate snapshot saving', default=0)
-    group3.add_argument('--training_step', type=float, help='Number of steps or seconds to train (used when training)', default=0.0001)
-    group3.add_argument('--sync_step', type=float, help='Number of seconds to sync NN if signaling_type is "NN". if -1, then compute it to have control/data of 10% (used when training)', default=0.001)
+    group3.add_argument('--training_step', type=float, help='Deprecated compatibility option; transition-driven training ignores it', default=0.0001)
+    # [Bug #13 Fix 2026-05-13] sync_step=0.001 + training_step=0.0001 → 每 10 步 hard-copy 一次 target
+    # 等于 target=Q，DQN 的 lagged-target 稳定性机制失效。标准做法是每 500-1000 grad steps sync 一次
+    # 改为 0.05 sim_sec (大约每 500 grad steps sync)，恢复 Bellman 收敛稳定性
+    group3.add_argument('--sync_step', type=float, help='Number of seconds to sync NN if signaling_type is "NN". if -1, then compute it to have control/data of 10%% (used when training)', default=0.05)
     group3.add_argument('--sync_ratio', type=float, help=' control/data ratio for computing the sync step automatically (used when training and sync step <0)', default=0.1)
     group3.add_argument('--replay_buffer_max_size', type=int, help='Max size of the replay buffers (used when training)', default=50000)
     group3.add_argument('--loss_penalty_type', type=str, choices=["None", "fixed"],
@@ -122,12 +165,90 @@ def parse_arguments():
     group_conweave.add_argument('--cdf', type=str, default='AliStorage2019', help='CDF file')
     group_conweave.add_argument('--enforce_win', type=int, default=0, help='Enforce window')
     group_conweave.add_argument('--sw_monitoring_interval', type=int, default=1000000, help='SW monitoring interval (ns)')
+    group_conweave.add_argument(
+        '--cwh_extra_reply_deadline',
+        type=int,
+        default=None,
+        help='ConWeave extra RTT_REPLY deadline in microseconds; omit for the upstream topology default',
+    )
+    group_conweave.add_argument(
+        '--cwh_path_pause_time',
+        type=int,
+        default=None,
+        help='ConWeave congested-path pause time in microseconds; omit for the upstream topology default',
+    )
+    group_conweave.add_argument(
+        '--cwh_extra_voq_flush_time',
+        type=int,
+        default=None,
+        help='ConWeave extra VOQ flush margin in microseconds; omit for the upstream topology default',
+    )
+    group_conweave.add_argument(
+        '--cwh_default_voq_waiting_time',
+        type=int,
+        default=None,
+        help='ConWeave fallback VOQ waiting time in microseconds; omit for the upstream topology default',
+    )
+    group_conweave.add_argument(
+        '--cwh_tx_expiry_time',
+        type=int,
+        default=None,
+        help='ConWeave inactive-flow expiry time in microseconds; omit for the upstream topology default',
+    )
     #新增控制是否启用prisma的参数存在意义存疑
     #group_conweave.add_argument('--conweave_use_prisma', type=int, default=0,help='If set to 1, enable PRISMA RL step-by-step routing logic in conweave; otherwise, use default conweave config-file-based batch simulation.')
     
 
     ## get the params dict 解析参数
     params = vars(parser.parse_args())
+
+    if params["simul_time"] <= 0:
+        parser.error("--simul_time must be positive")
+    if not (0.0 <= params["exploration_initial_eps"] <= 1.0):
+        parser.error("--exploration_initial_eps must be in [0, 1]")
+    if not (0.0 <= params["exploration_final_eps"] <= 1.0):
+        parser.error("--exploration_final_eps must be in [0, 1]")
+    if not (0.0 <= params["eval_epsilon"] <= 1.0):
+        parser.error("--eval_epsilon must be in [0, 1]")
+    if params["eval_prior_only"] not in (0, 1):
+        parser.error("--eval_prior_only must be 0 or 1")
+    if params["eval_prior_only"]:
+        if params["train"] != 0:
+            parser.error("--eval_prior_only=1 requires --train=0")
+        if params["lb"] != "rl":
+            parser.error("--eval_prior_only=1 requires --lb=rl")
+        if params["eval_epsilon"] != 0.0:
+            parser.error("--eval_prior_only=1 requires --eval_epsilon=0")
+    if params["il_phase_steps"] != 0:
+        parser.error(
+            "--il_phase_steps is disabled in rl-core-v8: ECMP hash labels depend on "
+            "flow identity, which is not part of the observation"
+        )
+    if params["learning_starts"] < params["batch_size"]:
+        parser.error("--learning_starts must be at least --batch_size")
+    if params["train_every"] <= 0:
+        parser.error("--train_every must be positive")
+    if params["target_update_interval"] <= 0:
+        parser.error("--target_update_interval must be positive")
+    if params["lb"] == "rl" and params["train"] == 0 and not params["load_path"]:
+        parser.error("Frozen RL evaluation requires --load_path")
+    if params["lb"] != "rl" and params["train"] != 0:
+        parser.error("Non-RL load balancing modes require --train=0")
+    conweave_timing_names = (
+        "cwh_extra_reply_deadline",
+        "cwh_path_pause_time",
+        "cwh_extra_voq_flush_time",
+        "cwh_default_voq_waiting_time",
+        "cwh_tx_expiry_time",
+    )
+    configured_conweave_timings = [
+        name for name in conweave_timing_names if params[name] is not None
+    ]
+    if configured_conweave_timings and params["lb"] != "conweave":
+        parser.error("ConWeave timing overrides require --lb=conweave")
+    for name in configured_conweave_timings:
+        if params[name] <= 0:
+            parser.error("--{} must be positive".format(name))
 
 # ------------------------------------------------------------------
 #  调用脚本，把 conweave topo 转成 overlay_adjacency_matrix.txt

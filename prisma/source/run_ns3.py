@@ -4,7 +4,7 @@
         params(dict): parameter dict
         configure(bool): if True, run ns3 configure
     Returns:
-        proc: process id of the ns3 simulator
+        subprocess.Popen: owned simulator launcher process
 """ 
 
 
@@ -80,8 +80,24 @@ def run_ns3(params, configure=True):
     print(f"Running ns3 simulator with process id: {proc.pid}")
     #用params字典中传进来的参数生成NS3仿真命令的字符串，并通过subprocess.Popen 异步启动
     os.chdir(current_folder_path)
-    return proc.pid
+    return proc
     '''
+    traffic_seed_arg = (
+        ""
+        if params.get("traffic_seed") is None
+        else f'--traffic_seed {int(params["traffic_seed"])} '
+    )
+    conweave_timing_args = "".join(
+        f'--{name} {int(params[name])} '
+        for name in (
+            "cwh_extra_reply_deadline",
+            "cwh_path_pause_time",
+            "cwh_extra_voq_flush_time",
+            "cwh_default_voq_waiting_time",
+            "cwh_tx_expiry_time",
+        )
+        if params.get(name) is not None
+    )
     runpy_cmd = (
         f'python3 run.py '
         f'--cc {params["cc"]} '
@@ -96,6 +112,10 @@ def run_ns3(params, configure=True):
         f'--cdf {params["cdf"]} '
         f'--enforce_win {params["enforce_win"]} '
         f'--sw_monitoring_interval {params["sw_monitoring_interval"]} '
+        f'--seed {params["seed"]} '
+        f'{traffic_seed_arg}'
+        f'{conweave_timing_args}'
+        f'--session_name {params["session_name"]} '
         f'--basePort {params["basePort"]} '
         f'--overlay_mat_file_name {params["overlay_adjacency_matrix_path"]} ' #8.19新增传输overlay矩阵路径到conweave的启动命令 
         f'--index_to_switch_id_map_file {params["index_to_switch_id_map_path"]}' #9.2新增传递映射文件路径
@@ -111,7 +131,7 @@ def run_ns3(params, configure=True):
     print(f"启动了conweave的run.py，pid为：{proc.pid}")
 
     os.chdir(current_folder_path)
-    return proc.pid
+    return proc
 
 
 """

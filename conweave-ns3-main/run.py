@@ -6,6 +6,8 @@ import time
 from xmlrpc.client import boolean
 import numpy as np
 import copy
+import hashlib
+import json
 import shutil
 import random
 from datetime import datetime
@@ -96,7 +98,7 @@ KMAX_MAP {kmax_map}
 KMIN_MAP {kmin_map}
 PMAX_MAP {pmax_map}
 LOAD {load}
-RANDOM_SEED 1
+RANDOM_SEED {seed}
 """
 #BASE_PORT OVERLAY_FILE_NAME新增占位符
 
@@ -120,6 +122,7 @@ lb_modes = {
 topo2bdp = {
     "leaf_spine_128_100G_OS2": 5000,  # 100Gbps RTT=8320ns
     "fat_k8_100G_OS2": 156000,  # 3-tier -> all 100Gbps
+    "leaf_spine_128_100G_asym_OS2": 5000,  # asymmetric: spines 140-143 at 500Mbps (adversarial)
 }
 
 FLOWGEN_DEFAULT_TIME = 2.0  # see /traffic_gen/traffic_gen.py::base_t
@@ -175,6 +178,12 @@ def main():
                         type=int, default=0, help="enforce to use window scheme (default: 0)")
     parser.add_argument('--sw_monitoring_interval', dest='sw_monitoring_interval', action='store',
                         type=int, default=10000, help="interval of sampling statistics for queue status (default: 10000ns)")
+    parser.add_argument('--seed', dest='seed', type=int, default=100,
+                        help="ns-3 random seed (default: 100)")
+    parser.add_argument('--traffic_seed', dest='traffic_seed', type=int, default=None,
+                        help="independent CDF traffic-generation seed; omitted keeps the legacy traffic file")
+    parser.add_argument('--session_name', dest='session_name', default="standalone",
+                        help="PRISMA session name recorded in the output manifest")
     parser.add_argument('--basePort',dest='basePort', type=int, default=6555, help="zmq base port(default:6555)")
     parser.add_argument('--overlay_mat_file_name',dest='overlay_mat_file_name',default="../prisma/examples/abilene/topology_files/overlay_adjacency_matrix.txt",help="path to the overlay adjacency matrix file")
     parser.add_argument('--index_to_switch_id_map_file', dest='index_to_switch_id_map_file', default="", help="path to the file mapping RL agent index to switch ID")
@@ -189,24 +198,40 @@ def main():
     parser.add_argument('--ar_step_us', dest='ar_step_us', type=float, default=340.0, help="inter-round interval in microseconds")
     parser.add_argument('--ar_jitter_us', dest='ar_jitter_us', type=float, default=10.0, help="per-flow random jitter in microseconds")
     parser.add_argument('--ar_chunk_bytes', dest='ar_chunk_bytes', type=int, default=4194304, help="per-round message size in bytes;if omitted,sample from CDF")
-    parser.add_argument('--ar_rotate_ring', dest='ar_rotate_ring', type=int, default=0, help="if 1 ,dst=(i+1+r)%N;if 0,dst=(i+1)%N")
+    parser.add_argument('--ar_rotate_ring', dest='ar_rotate_ring', type=int, default=0, help="if 1 ,dst=(i+1+r)%%N;if 0,dst=(i+1)%%N")
     
     parser.add_argument('--aa_rounds', dest='aa_rounds', type=int, default=1)
     parser.add_argument('--aa_chunk_bytes', dest='aa_chunk_bytes', type=int, default=4194304)
     parser.add_argument('--aa_burst_us', dest='aa_burst_us', type=float, default=5000.0)
     # #### CONWEAVE PARAMETERS ####
-    # parser.add_argument('--cwh_extra_reply_deadline', dest='cwh_extra_reply_deadline', action='store',
-    #                     type=int, default=4, help="extra-timeout, where reply_deadline = base-RTT + extra-timeout (default: 4us)")
-    # parser.add_argument('--cwh_path_pause_time', dest='cwh_path_pause_time', action='store',
-    #                     type=int, default=16, help="Time to pause the path with ECN feedback (default: 8us")
-    # parser.add_argument('--cwh_extra_voq_flush_time', dest='cwh_extra_voq_flush_time', action='store',
-    #                     type=int, default=16, help="Extra VOQ Flush Time (default: 8us for IRN)")
-    # parser.add_argument('--cwh_default_voq_waiting_time', dest='cwh_default_voq_waiting_time', action='store',
-    #                     type=int, default=400, help="Default VOQ Waiting Time (default: 400us)")
-    # parser.add_argument('--cwh_tx_expiry_time', dest='cwh_tx_expiry_time', action='store',
-    #                     type=int, default=1000, help="timeout value of ConWeave Tx for CLEAR signal (default: 1000us)")
+    # None preserves the upstream topology/flow-control defaults below.  Explicit
+    # overrides are useful when the original 100G setup is bandwidth-scaled.
+    parser.add_argument('--cwh_extra_reply_deadline', dest='cwh_extra_reply_deadline',
+                        type=int, default=None, help="extra RTT_REPLY deadline in us")
+    parser.add_argument('--cwh_path_pause_time', dest='cwh_path_pause_time',
+                        type=int, default=None, help="congested-path pause time in us")
+    parser.add_argument('--cwh_extra_voq_flush_time', dest='cwh_extra_voq_flush_time',
+                        type=int, default=None, help="extra VOQ flush margin in us")
+    parser.add_argument('--cwh_default_voq_waiting_time', dest='cwh_default_voq_waiting_time',
+                        type=int, default=None, help="fallback VOQ waiting time in us")
+    parser.add_argument('--cwh_tx_expiry_time', dest='cwh_tx_expiry_time',
+                        type=int, default=None, help="inactive-flow expiry time in us")
 
     args = parser.parse_args()
+    conweave_timing_names = (
+        "cwh_extra_reply_deadline",
+        "cwh_path_pause_time",
+        "cwh_extra_voq_flush_time",
+        "cwh_default_voq_waiting_time",
+        "cwh_tx_expiry_time",
+    )
+    for name in conweave_timing_names:
+        value = getattr(args, name)
+        if value is not None and value <= 0:
+            parser.error("--{} must be positive".format(name))
+    if args.lb != "conweave" and any(
+            getattr(args, name) is not None for name in conweave_timing_names):
+        parser.error("ConWeave timing overrides require --lb conweave")
     print("Base port to be written into config.txt:", args.basePort)
 
     # make running ID of this config
@@ -272,9 +297,18 @@ def main():
     #     raise Exception("CONFIG ERROR : Runtime must be larger than 5ms (= warmup interval).")
 
     assert (hostload >= 0 and hostload < 100)
+    traffic_seed_tag = (
+        "" if args.traffic_seed is None else "_TS{}".format(args.traffic_seed)
+    )
     if args.traffic_mode == 'cdf':
-        flow = "L_{load:.2f}_CDF_{cdf}_N_{n_host}_T_{time}ms_B_{bw}_flow".format(
-            load=hostload, cdf=args.cdf, n_host=n_host, time=int(float(args.simul_time) * 1000), bw=bw)
+        flow = "L_{load:.2f}_CDF_{cdf}_N_{n_host}_T_{time}ms_B_{bw}{seed_tag}_flow".format(
+            load=hostload,
+            cdf=args.cdf,
+            n_host=n_host,
+            time=int(float(args.simul_time) * 1000),
+            bw=bw,
+            seed_tag=traffic_seed_tag,
+        )
     elif args.traffic_mode == 'allreduce':
         ar_rounds = args.ar_rounds if args.ar_rounds is not None else 2 * (n_host - 1)
         size_tag = ("CH{}".format(args.ar_chunk_bytes)
@@ -307,11 +341,18 @@ def main():
     else:
         print("Generate a input traffic file... ->", out_path)
         if args.traffic_mode == 'cdf':
+            seed_arg = (
+                ""
+                if args.traffic_seed is None
+                else "--seed {}".format(args.traffic_seed)
+            )
             cmd = ("python ./traffic_gen/traffic_gen.py "
-                   "-c {cdf} -n {n_host} -l {load} -b {bw} -t {time} -o {output}").format(
+                   "-c {cdf} -n {n_host} -l {load} -b {bw} -t {time} "
+                   "-o {output} {seed_arg}").format(
                 cdf=os.getcwd() + "/traffic_gen/" + args.cdf + ".txt",
                 n_host=n_host, load=hostload / 100.0,
-                bw=args.bw + "G", time=args.simul_time, output=out_path)
+                bw=args.bw + "G", time=args.simul_time, output=out_path,
+                seed_arg=seed_arg)
         elif args.traffic_mode == 'allreduce':
             chunk_arg = ("--chunk_bytes {cb}".format(cb=args.ar_chunk_bytes)) if args.ar_chunk_bytes else ""
             cdf_arg = ("-c " + os.getcwd() + "/traffic_gen/" + args.cdf + ".txt") if not args.ar_chunk_bytes else ""
@@ -347,7 +388,8 @@ def main():
             raise Exception("Unknown traffic_mode: {}".format(args.traffic_mode))
         
         print(cmd)
-        os.system(cmd)
+        if os.system(cmd) != 0 or not exists(out_path):
+            raise RuntimeError("Traffic generation failed: {}".format(cmd))
 
     # sanity check - bandwidth
     with open("config/{topo}.txt".format(topo=args.topo), 'r') as f_topo:
@@ -394,6 +436,29 @@ def main():
         cwh_default_voq_waiting_time = 400
         cwh_tx_expiry_time = 1000
 
+    # Override only explicitly supplied values so historical commands retain
+    # byte-for-byte equivalent configuration behavior.
+    for name in conweave_timing_names:
+        value = getattr(args, name)
+        if value is not None:
+            if name == "cwh_extra_reply_deadline":
+                cwh_extra_reply_deadline = value
+            elif name == "cwh_path_pause_time":
+                cwh_path_pause_time = value
+            elif name == "cwh_extra_voq_flush_time":
+                cwh_extra_voq_flush_time = value
+            elif name == "cwh_default_voq_waiting_time":
+                cwh_default_voq_waiting_time = value
+            elif name == "cwh_tx_expiry_time":
+                cwh_tx_expiry_time = value
+
+    # Record effective values, including upstream defaults, in run_manifest.json.
+    args.cwh_extra_reply_deadline = cwh_extra_reply_deadline
+    args.cwh_path_pause_time = cwh_path_pause_time
+    args.cwh_extra_voq_flush_time = cwh_extra_voq_flush_time
+    args.cwh_default_voq_waiting_time = cwh_default_voq_waiting_time
+    args.cwh_tx_expiry_time = cwh_tx_expiry_time
+
     ##################################################################
 
     # make directory if not exists
@@ -408,6 +473,24 @@ def main():
     # print("Config filename:{}".format(config_name))
     os.makedirs(run_dir)
     print("The new directory is created  - {}".format(run_dir))
+
+    with open(os.path.join(run_dir, "run_manifest.json"), "w") as manifest_file:
+        flow_hasher = hashlib.sha256()
+        with open(out_path, "rb") as flow_file:
+            for chunk in iter(lambda: flow_file.read(1024 * 1024), b""):
+                flow_hasher.update(chunk)
+        json.dump(
+            {
+                "config_id": config_ID,
+                "command": sys.argv,
+                "flow_file": os.path.abspath(out_path),
+                "flow_file_sha256": flow_hasher.hexdigest(),
+                "parameters": vars(args),
+            },
+            manifest_file,
+            indent=2,
+            sort_keys=True,
+        )
 
     os.environ["MIX_OUTPUT_DIR"] = run_dir
     print("MIX_OUTPUT_DIR set to:", os.environ["MIX_OUTPUT_DIR"])
@@ -488,6 +571,7 @@ def main():
                                         has_win=has_win, var_win=var_win,
                                         fast_react=fast_react, mi=mi, int_multi=int_multi, ewma_gain=ewma_gain,
                                         kmax_map=kmax_map, kmin_map=kmin_map, pmax_map=pmax_map, basePort = args.basePort,
+                                        seed=args.seed,
                                         overlay_mat_file_name=args.overlay_mat_file_name,
                                         index_to_switch_id_map_file=args.index_to_switch_id_map_file,)#8.19新增overlay 9.2新增map
         print("Final config content preview:\n")
@@ -554,4 +638,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

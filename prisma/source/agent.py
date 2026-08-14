@@ -44,6 +44,10 @@ class Agent():
         cl.seed = params_dict["seed"]
         cl.iterationNum = params_dict["iterationNum"]
         cl.exploration_schedule_timesteps = params_dict.get("exploration_schedule_timesteps", 0)
+        cl.il_phase_steps = 0
+        cl.learning_starts = params_dict["learning_starts"]
+        cl.train_every = params_dict["train_every"]
+        cl.target_update_interval = params_dict["target_update_interval"]
         cl.prioritizedReplayBuffer=params_dict["prioritizedReplayBuffer"]
         cl.simArgs = {"--simTime": cl.iterationNum,
                     "--testArg": 123}
@@ -54,6 +58,8 @@ class Agent():
         cl.gamma = params_dict["gamma"]
         cl.exploration_initial_eps = params_dict["exploration_initial_eps"]
         cl.exploration_final_eps = params_dict["exploration_final_eps"]
+        cl.eval_epsilon = params_dict.get("eval_epsilon", 0.0)
+        cl.eval_prior_only = bool(params_dict.get("eval_prior_only", 0))
         cl.signaling_type = params_dict["signaling_type"]
         cl.training_step = params_dict["training_step"]
         cl.sync_step = params_dict["sync_step"]
@@ -179,5 +185,3 @@ class Agent():
 
     def run(self):
         pass
-
-

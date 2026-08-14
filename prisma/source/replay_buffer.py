@@ -27,9 +27,10 @@ class ReplayBuffer(object):
     def __len__(self):
         return len(self._storage)
 
-    def add(self, obs_t, action, reward, obs_tp1, done):
+    def add(self, obs_t, action, reward, obs_tp1, done, ecmp_action=-1):
+        # [Design B 2026-05-14] ecmp_action 用于 Warm-start IL phase（监督目标）
         self.total_samples += 1
-        data = (obs_t, action, reward, obs_tp1, done)
+        data = (obs_t, action, reward, obs_tp1, done, int(ecmp_action))
 
         if self._next_idx >= len(self._storage):
             self._storage.append(data)
@@ -38,19 +39,26 @@ class ReplayBuffer(object):
         self._next_idx = (self._next_idx + 1) % self._maxsize
 
     def _encode_sample(self, idxes):
-        obses_t, actions, rewards, obses_tp1, dones = [], [], [], [], []
+        obses_t, actions, rewards, obses_tp1, dones, ecmp_actions = [], [], [], [], [], []
         for i in idxes:
             data = self._storage[i]
-            obs_t, action, reward, obs_tp1, done = data
+            # [Design B 2026-05-14] 6-tuple includes ecmp_action; backward-compat with 5-tuple
+            if len(data) == 6:
+                obs_t, action, reward, obs_tp1, done, ecmp_a = data
+            else:
+                obs_t, action, reward, obs_tp1, done = data
+                ecmp_a = -1
             obses_t.append(obs_t)
             actions.append(np.array(action, copy=False))
             rewards.append(reward)
             obses_tp1.append(obs_tp1)
             dones.append(done)
+            ecmp_actions.append(int(ecmp_a))
         try:
             obs_batch = normalize_obs(np.array(obses_t, dtype=float))
             next_obs_batch = normalize_obs(np.array(obses_tp1, dtype=float))
-            return obs_batch, np.array(actions), np.array(rewards), next_obs_batch, np.array(dones), np.ones(len(idxes), dtype=np.float32)
+            # 返回 7 项：原 6 项 + ecmp_actions
+            return obs_batch, np.array(actions), np.array(rewards), next_obs_batch, np.array(dones), np.ones(len(idxes), dtype=np.float32), np.array(ecmp_actions, dtype=np.int32)
         except:
             print("ERROR")
             print(obses_t)

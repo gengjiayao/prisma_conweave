@@ -23,8 +23,11 @@
 
   namespace {
     std::atomic<uint64_t> S_seen{0}, S_gated{0}, S_bypass{0}, S_back{0}, S_fwd{0};
-    // NEW: Flowlet 总数（无论是否成功挂起）
+    // Flowlet decision coverage and explicit routing outcomes.
     std::atomic<uint64_t> S_flowletNew{0};
+    std::atomic<uint64_t> S_flowletReusePkts{0};
+    std::atomic<uint64_t> S_flowletDwellReuse{0};
+    std::atomic<uint64_t> S_flowletFallbackPkts{0};
     // NEW: 采纳一致性 + 长环路抽样，进程级聚合
     std::atomic<uint64_t> S_decChosen{0}, S_decMatch{0}, S_decMismatch{0};
     std::atomic<uint64_t> S_longLoopSample{0}, S_longLoopHit{0};
@@ -77,7 +80,7 @@
     }
 
     // 写CSV表头
-    m_rewardCsv << "time_sec,out_if,T,qSmooth,avg_queue_bytes,q_score,R_norm,R_qcn,r_inst,r_level,delta,"
+    m_rewardCsv << "time_sec,out_if,T,capacity_norm,headroom,qSmooth,avg_queue_bytes,q_score,queue_trend,R_norm,R_qcn,r_inst,r_level,delta,"
                   "bw_bps,rtt_sec,bdp_bytes,q_lmin,q_lmax\n";
     m_rewardCsv.flush();
     m_rewardCsvOpened = true;
@@ -125,9 +128,8 @@
     uint32_t dip = ch.dip;
     auto itTor = Settings::hostIp2SwitchId.find(dip);
     int dstOverlay = -1;
-    uint32_t dstTorId = 0;
     if (itTor != Settings::hostIp2SwitchId.end()) {
-      dstTorId = itTor->second;
+      uint32_t dstTorId = itTor->second;
       if (dstTorId < m_nodeIdToOverlay.size()) dstOverlay = m_nodeIdToOverlay[dstTorId];
     }
 
@@ -149,7 +151,10 @@
     if (firstEver) newFlowlet = true; else if ((now - ctx.lastSeenSec) > m_flowletGapSec) newFlowlet = true;
     if (newFlowlet) { S_flowletNew++; }
     
-    // === 动作平滑：检查是否在最小驻留时间内 ===
+    // v8 keeps the dwell gate explicit for diagnostics.  Its configured
+    // value is zero because the flowlet gap already prevents switching
+    // inside a flowlet; suppressing decisions for another 1.5 ms silently
+    // reused stale routes across dozens of real flowlet boundaries.
     bool canSwitch = (now >= ctx.lockedUntilSec);
     
     ctx.lastSeenSec = now;
@@ -181,10 +186,29 @@
       m_globalInjected++;
     }
 
-    /* 4. 构造特征：[dstOverlay, lastAction] + 每邻居出口5维（cost, ce_local, ce_remote_min, queueDeriv, cov） */
+    /* 4. Build the rl-core-v8 observation from statistics that are actually
+     * maintained while lb=rl:
+     * [dstOverlay, lastAction] + per-egress
+     * (queueOccupancy, queueEma, dreUtilization, queueTrend,
+     *  capacityHeadroom, relativeCapacity).
+     *
+     * CONGA's GetOneHopMetrics cannot be used here.  CONGA initialization and
+     * RouteInput run only for lb_mode=3, whereas RL uses lb_mode=7 and takes
+     * over before the CONGA path.  Reading it from RL produced four constants
+     * in output 568075741 despite appearing to be a real congestion signal.
+     */
     std::vector<uint32_t> feats;
     feats.reserve(2 + m_overlayNeighbors.size() * kFeatsPerEgress);
     feats.push_back((uint32_t)std::max(0, dstOverlay));
+
+    const double obsScale = 5000.0;
+    double maxEgressBandwidthBps = 1.0;
+    for (uint32_t egressIf : m_egressIfs) {
+      maxEgressBandwidthBps = std::max(
+        maxEgressBandwidthBps,
+        ResolveLinkBandwidthBps(egressIf)
+      );
+    }
     
     // 新增：上一步动作 ID（首次为 0，后续为实际动作）
     uint32_t lastAction = 0;
@@ -202,47 +226,38 @@
     }
     feats.push_back(lastAction);
 
+    const double observationTimeSec = Simulator::Now().GetSeconds();
+    auto clamp01 = [](double x) {
+      if (!std::isfinite(x)) return 0.0;
+      return std::min(1.0, std::max(0.0, x));
+    };
+    auto quantize = [&](double x) {
+      return static_cast<uint32_t>(std::lround(clamp01(x) * obsScale));
+    };
+
     for (size_t i = 0; i < m_overlayNeighbors.size(); ++i) {
       uint32_t ifx = (i < m_egressIfs.size() ? m_egressIfs[i] : 0);
+      double egressBandwidthBps = ResolveLinkBandwidthBps(ifx);
+      EgressPortStats& st = m_portStats[ifx];
+      st.bwBps = egressBandwidthBps;
 
-      // 基线：本地队列字节
-      uint32_t localQBytes = 0;
-      if (ifx > 0 && ifx < sw->GetNDevices()) {
-        Ptr<QbbNetDevice> dev = DynamicCast<QbbNetDevice>(sw->GetDevice(ifx));
-        if (dev && dev->GetQueue()) localQBytes = dev->GetQueue()->GetNBytesTotal();
-      }
+      // Sample every candidate at decision time.  MacTx still supplies the
+      // high-rate samples, while this read makes idle-port decay observable.
+      UpdateQueueStats(ifx, observationTimeSec);
+      double utilization = DecayAndGetDreUtilization(ifx, observationTimeSec);
+      double capacity = clamp01(egressBandwidthBps / maxEgressBandwidthBps);
+      double headroom = clamp01(capacity * (1.0 - utilization));
+      double qRef = QueueReferenceBytes(st);
+      double queueOccupancy = clamp01(st.lastQueueBytes / (st.lastQueueBytes + qRef));
+      double queueEma = clamp01(st.avgQueueBytes / (st.avgQueueBytes + qRef));
+      double queueTrend = clamp01(0.5 * (QueueTrendNormalized(st) + 1.0));
 
-      // 默认值（回退）：cost=localQBytes，其余四项=0
-      uint32_t cost_bytes = localQBytes;
-      uint32_t ce_local_b = 0, ce_remote_b = 0, queueDeriv_b = 0, cov_b = 0;
-
-      // 优先：使用 CONGA 一跳融合指标，将各项(0..1)映射到 ~BDP 字节量级
-      if (sw && sw->m_mmu) {
-        CongaRouting::OneHopMetrics m;
-        if (sw->m_mmu->m_congaRouting.GetOneHopMetrics(dstTorId, ifx, &m)) {
-          auto clamp01 = [](double x){ return std::min(1.0, std::max(0.0, x)); };
-          double bw = ResolveLinkBandwidthBps(ifx);
-          double bdpBytes = std::max(1.0, bw * m_rttGuessSec / 8.0);
-          cost_bytes  = (uint32_t)std::lround(clamp01(m.score)              * bdpBytes);
-          ce_local_b  = (uint32_t)std::lround(clamp01(m.ce_local_norm)      * bdpBytes);
-          ce_remote_b = (uint32_t)std::lround(clamp01(m.ce_remote_min_norm) * bdpBytes);
-          // age_b 替换为 queueDerivEma（拥塞预警）
-          auto itPort = m_portStats.find(ifx);
-          if (itPort != m_portStats.end()) {
-            // 将队列导数归一化到 BDP 量级：正值表示队列上升（拥塞加剧）
-            double derivNorm = itPort->second.queueDerivEma / std::max(1.0, bdpBytes);
-            derivNorm = std::max(-1.0, std::min(1.0, derivNorm));  // clamp to [-1,1]
-            queueDeriv_b = (uint32_t)std::lround((derivNorm + 1.0) * 0.5 * bdpBytes);  // map to [0, bdpBytes]
-          }
-          cov_b       = (uint32_t)std::lround(clamp01(m.cov_norm)           * bdpBytes);
-        }
-      }
-
-      feats.push_back(cost_bytes);
-      feats.push_back(ce_local_b);
-      feats.push_back(ce_remote_b);
-      feats.push_back(queueDeriv_b);  // 第4维：队列变化率（替换原 age_b）
-      feats.push_back(cov_b);
+      feats.push_back(quantize(queueOccupancy));
+      feats.push_back(quantize(queueEma));
+      feats.push_back(quantize(utilization));
+      feats.push_back(quantize(queueTrend));
+      feats.push_back(quantize(headroom));
+      feats.push_back(quantize(capacity));
     }
       
       /* 4. 直接走你现有的 ZMQ 发送路径 */
@@ -250,7 +265,26 @@
       return; // 仅首包挂起，其余包不挂起
     }
 
-    // 非首包或未过最小驻留：不挂起，直接按已有策略转发
+    // Every packet that does not need a fresh decision must still use the
+    // action owned by this RL flowlet context.  Sending it through
+    // SendToDevContinue used a second, shorter cache in SwitchNode; when that
+    // cache expired during the old dwell lock the packet silently fell back
+    // to ECMP.  Direct release makes the ownership contract unambiguous.
+    if (ctx.lastActionOutIf > 0) {
+      if (m_rlHeldUids.size() > 50000) m_rlHeldUids.clear();
+      m_rlHeldUids.insert(p->GetUid());
+      if (newFlowlet) {
+        S_flowletDwellReuse++;
+      } else {
+        S_flowletReusePkts++;
+      }
+      sw->RlRelease(p, ch, ctx.lastActionOutIf);
+      return;
+    }
+
+    // This is an explicitly counted defensive fallback, never an implicit
+    // part of the normal RL route.  A correct v8 run must report zero.
+    S_flowletFallbackPkts++;
     sw->SendToDevContinue(p, ch);
   }
 
@@ -294,7 +328,10 @@
         << ",global_injected=" << m_globalInjected
         << ",global_buffered=" << m_globalBuffered
         << ",signaling_overhead=" << 0
-        << ",lost_list=" << DrainLostPacketsSemicolon(); // 形如 "12;45;"
+        << ",lost_list=" << DrainLostPacketsSemicolon() // 形如 "12;45;"
+        // [Design B 2026-05-14] Warm-start IL: 计算 ECMP 期望动作并加入 info
+        // Python 端用作监督学习的 target action
+        << ",ecmp_action=" << ComputeEcmpActionForHeldPacket();
 
     m_lastInfo = oss.str();
 
@@ -364,39 +401,23 @@
     auto &st = m_portStats[outIf];
     st.accTxBytes += p->GetSize();
 
-    // === [DRE] 更新指数衰减字节累加器 0505添加===
-      {
-        double now_dre = Simulator::Now().GetSeconds();
-        double dt_dre = now_dre - st.last_dre_update_time;
-        if (dt_dre < 0) dt_dre = 0;  // 防御
-        if (st.last_dre_update_time > 0) {
-          st.dre_bytes *= std::exp(-dt_dre / m_dreTau);
-        }
+    // Update the RL-native DRE.  Decay is shared with observation/reward reads
+    // so an idle port cannot retain stale utilization indefinitely.
+    {
+      bool isRlHeld = false;
+      auto rit = m_rlHeldUids.find(p->GetUid());
+      if (rit != m_rlHeldUids.end()) {
+        isRlHeld = true;
+        m_rlHeldUids.erase(rit);  // 一次性消费
+      }
+      double now_dre = Simulator::Now().GetSeconds();
+      (void)DecayAndGetDreUtilization(outIf, now_dre);
+      if (isRlHeld) {
         st.dre_bytes += static_cast<double>(p->GetSize());
-        st.last_dre_update_time = now_dre;
       }
-
-    // Queue integration for fixed window (ACC style)
-    double now = Simulator::Now().GetSeconds();
-    int64_t q = ReadQueueBytes(outIf);
-    if (q >= 0) {
-      if (st.lastQueueSampleSec == 0.0) st.lastQueueSampleSec = now;
-      st.queueIntBytes += double(q) * (now - st.lastQueueSampleSec);
-      st.lastQueueSampleSec = now;
-      
-      // Keep EMA for backward compatibility
-      double alpha = 0.2;
-      st.avgQueueBytes = (1.0 - alpha) * st.avgQueueBytes + alpha * double(q);
-
-      // === 新增：更新队列变化率 EMA ===
-      double dt = now - st.lastQueueSampleSec;
-      if (dt > 1e-9) {  // 避免除零
-        double qDeriv = (double(q) - st.lastQueueBytes) / dt;  // bytes/sec
-        double derivAlpha = 0.15;  // 队列导数的平滑系数
-        st.queueDerivEma = (1.0 - derivAlpha) * st.queueDerivEma + derivAlpha * qDeriv;
-      }
-      st.lastQueueBytes = double(q);
     }
+
+    UpdateQueueStats(outIf, Simulator::Now().GetSeconds());
   }
 
   int64_t
@@ -464,14 +485,77 @@
   double
   ConweaveObsManager::ResolveLinkBandwidthBps(uint32_t outIf)
   {
-    (void) outIf;
-    // Minimal safe implementation: return a reasonable default (100 Gbps)
-    // to avoid depending on non-portable device/channel APIs. This ensures
-    // the code compiles and yields usable reward signals (util-based)
-    // while a follow-up patch can extract the real DataRate from device
-    // attributes when available.
-    //return 100e9; // 100 Gbps
-    return 1e9; //1Gbps
+    // [Asym Topology Fix 2026-05-19] Query the actual device DataRate so per-port
+    // bwBps is correct under heterogeneous link speeds (e.g. slow spines).
+    // Old behavior: hardcoded 1Gbps regardless of outIf -> T_port wrong on slow links.
+    if (!m_sw || outIf == 0 || outIf >= m_sw->GetNDevices()) return 1e9;
+    Ptr<QbbNetDevice> dev = DynamicCast<QbbNetDevice>(m_sw->GetDevice(outIf));
+    if (!dev) return 1e9;
+    uint64_t bps = dev->GetDataRate().GetBitRate();
+    return (bps > 0) ? static_cast<double>(bps) : 1e9;
+  }
+
+  void
+  ConweaveObsManager::UpdateQueueStats(uint32_t outIf, double nowSec)
+  {
+    int64_t queueBytes = ReadQueueBytes(outIf);
+    if (queueBytes < 0 || !std::isfinite(nowSec)) return;
+
+    EgressPortStats& st = m_portStats[outIf];
+    double currentQueue = static_cast<double>(queueBytes);
+    if (st.lastQueueSampleSec <= 0.0 || nowSec <= st.lastQueueSampleSec) {
+      st.lastQueueSampleSec = nowSec;
+      st.lastQueueBytes = currentQueue;
+      if (st.avgQueueBytes <= 0.0) st.avgQueueBytes = currentQueue;
+      return;
+    }
+
+    double dt = nowSec - st.lastQueueSampleSec;
+    double tau = std::max(1e-9, m_queueEmaTau);
+    double alpha = 1.0 - std::exp(-dt / tau);
+    alpha = std::min(1.0, std::max(0.0, alpha));
+    double derivative = (currentQueue - st.lastQueueBytes) / dt;
+    st.queueDerivEma = (1.0 - alpha) * st.queueDerivEma + alpha * derivative;
+    st.avgQueueBytes = (1.0 - alpha) * st.avgQueueBytes + alpha * currentQueue;
+    st.queueIntBytes += currentQueue * dt;
+    st.lastQueueSampleSec = nowSec;
+    st.lastQueueBytes = currentQueue;
+  }
+
+  double
+  ConweaveObsManager::DecayAndGetDreUtilization(uint32_t outIf, double nowSec)
+  {
+    EgressPortStats& st = m_portStats[outIf];
+    if (st.bwBps <= 0.0) st.bwBps = ResolveLinkBandwidthBps(outIf);
+    if (st.last_dre_update_time > 0.0 && nowSec > st.last_dre_update_time) {
+      double tau = std::max(1e-9, m_dreTau);
+      st.dre_bytes *= std::exp(-(nowSec - st.last_dre_update_time) / tau);
+    }
+    st.last_dre_update_time = nowSec;
+    double denominator = std::max(1e-9, m_dreTau * st.bwBps);
+    double utilization = st.dre_bytes * 8.0 / denominator;
+    if (!std::isfinite(utilization)) return 0.0;
+    return std::min(1.0, std::max(0.0, utilization));
+  }
+
+  double
+  ConweaveObsManager::QueueReferenceBytes(const EgressPortStats& st) const
+  {
+    double qRefBdp = m_queueRefAlphaBdp * st.qBdpBytes;
+    double qRefBuf = m_queueRefBetaBuf * m_upperBound;
+    return std::max({qRefBdp, qRefBuf, m_queueRefMinBytes, 1.0});
+  }
+
+  double
+  ConweaveObsManager::QueueTrendNormalized(const EgressPortStats& st) const
+  {
+    // queueDerivEma is bytes/second.  Normalize by the port service rate in
+    // bytes/second; the former division by BDP bytes was dimensionally wrong
+    // and saturated output 568075741 near one.
+    double serviceBytesPerSec = std::max(1.0, st.bwBps / 8.0);
+    double trend = st.queueDerivEma / serviceBytesPerSec;
+    if (!std::isfinite(trend)) return 0.0;
+    return std::min(1.0, std::max(-1.0, trend));
   }
 
   // double
@@ -759,6 +843,7 @@
     EgressPortStats& st = itps->second;
 
     double now = Simulator::Now().GetSeconds();
+    UpdateQueueStats(m_lastActionOutIf, now);
 
     auto safe = [](double x) {
       return std::isfinite(x) ? x : 0.0;
@@ -767,38 +852,8 @@
       return std::min(1.0, std::max(0.0, x));
     };
 
-    // =========================
-    // 1) 利用 per-flow EMA 做端口利用率 T
-    // =========================
-
     double bwBps = (st.bwBps > kEps) ? st.bwBps : ResolveLinkBandwidthBps(m_lastActionOutIf);
-
-    double sumFlowBps = 0.0;
-    uint32_t activeFlows = 0;
-
-    for (const auto &kv : m_flow2OutIf) {
-      const auto &fm = kv.second;
-      // 只看当前动作端口
-      if (fm.outIf != m_lastActionOutIf) continue;
-      // 丢掉太老的 flow 映射，避免僵尸数据
-      if ((now - fm.ts) > m_flowMapTtlSec) continue;
-
-      auto itFs = m_flowStats.find(kv.first);
-      if (itFs == m_flowStats.end()) continue;
-
-      double bps = itFs->second.emaBps;
-      if (!std::isfinite(bps) || bps <= 0.0) continue;
-
-      sumFlowBps += bps;
-      activeFlows += 1;
-    }
-
-    double T = 0.0;
-    if (bwBps > kEps && sumFlowBps > 0.0) {
-      // 端口利用率（所有映射到该端口的 flow 之和 / 端口带宽）
-      T = sumFlowBps / bwBps;
-    }
-    T = clamp01(safe(T));
+    st.bwBps = bwBps;
 
     // =========================
     // 2) 队列项：直接用 avgQueueBytes + ACC 阶梯打分
@@ -806,9 +861,7 @@
 
     double L = st.avgQueueBytes;  // OnMacTx 里已经做过 EMA
     // Hybrid scale: max(alpha*BDP, beta*BufferCap), with floor
-    double qRefBdp = m_queueRefAlphaBdp * st.qBdpBytes;
-    double qRefBuf = m_queueRefBetaBuf * m_upperBound;
-    double qRef = std::max({qRefBdp, qRefBuf, m_queueRefMinBytes});
+    double qRef = QueueReferenceBytes(st);
     double qScore = (qRef > 0.0) ? (1.0 / (1.0 + (L / qRef))) : 0.0;
     st.qSmooth = (1.0 - m_qSmoothLambda) * st.qSmooth + m_qSmoothLambda * qScore;
     st.qSmooth = clamp01(safe(st.qSmooth));
@@ -858,23 +911,22 @@
     // 5) 拼 reward：T + 队列 + 乱序 + （可选）QCN
     // =========================
 
-    double w_dup = std::max(0.0, (m_rewardWDup > 0.0 ? m_rewardWDup
-                                                    : 1.0 - (m_rewardWUtil + m_rewardWQueue)));
-
     // === Patch Start: Soften the R_norm penalty ===
     // 使用平方惩罚抑制低水平噪声
     double R_norm_sq = R_norm * R_norm; 
     // 确保范围安全
     if (R_norm_sq > 1.0) R_norm_sq = 1.0;
 
-    // === 新增：队列上升趋势惩罚（拥塞预警） ===
-    double queueDerivPenalty = 0.0;
-    if (st.queueDerivEma > 0.0) {
-      // 队列正在上升，给予适度惩罚（归一化到 [0,1]）
-      double bdp = std::max(1.0, st.qBdpBytes);
-      double derivNorm = std::min(1.0, st.queueDerivEma / bdp);  // 正值，越大惩罚越重
-      queueDerivPenalty = 0.05 * derivNorm;  // 权重 0.05，避免过度惩罚
-    }
+    // Queue growth normalized by service bytes/second.  The encoded trend is
+    // shared with the v8 observation and safe action prior: zero means a
+    // draining queue, 0.5 is neutral, and one means maximum growth.
+    double queueTrendNorm = QueueTrendNormalized(st);
+    double queueTrendEncoded = clamp01(0.5 * (queueTrendNorm + 1.0));
+    double trendHealth = 1.0 - queueTrendEncoded;
+    double instantQueueOccupancy = (qRef > 0.0)
+      ? clamp01(st.lastQueueBytes / (st.lastQueueBytes + qRef))
+      : 0.0;
+    double instantQueueHealth = 1.0 - instantQueueOccupancy;
 
     // // [Fix v2] T 重设计：用 per-port 真实吞吐率替代失效的 flow EMA
     // // accTxBytes 在 OnMacTx 中累加，winStartSec 在上次 ComputeReward 末尾重置
@@ -887,20 +939,36 @@
     // [Fix v3] T 重设计 v3: DRE 风格累加器（CONGA-inspired）
       // dre_bytes 在 OnMacTx 中按时间常数 m_dreTau 指数衰减+累加
       // 优势：统计窗口与 ComputeReward 触发频率解耦，反映最近 ~τ 时间的真实端口利用率
-      double T_port = 0.0;
-      if (m_dreTau > 1e-9 && bwBps > 1e-9) {
-        T_port = (st.dre_bytes * 8.0) / (m_dreTau * bwBps);
-      }
-      T_port = clamp01(safe(T_port));
+      double T_port = DecayAndGetDreUtilization(m_lastActionOutIf, now);
 
-    double w_util  = 0.3;
-    double w_queue = 0.3;
-    w_dup   = 0.4;  // override
-    double r_inst = w_util * (1.0 - T_port)  // [Fix 2026-05-12] T 是 cost (CONGA DRE 语义)，反向使用
-                  + w_queue * st.qSmooth
-                  + w_dup * (1.0 - R_norm_sq)
-                  + m_rewardWQcn * (1.0 - R_qcn)
-                  - queueDerivPenalty;
+    // Capacity-aware absolute headroom.  The former (1-T_port) term gave the
+    // same best-case reward to a 500 Mbps and a 1 Gbps uplink and historical
+    // output 450009057 consequently rewarded slow links more highly.  Scaling
+    // by the fastest local egress expresses available service rate in common
+    // units while preserving congestion sensitivity.
+    double maxEgressBandwidthBps = std::max(1.0, bwBps);
+    for (uint32_t egressIf : m_egressIfs) {
+      maxEgressBandwidthBps = std::max(
+        maxEgressBandwidthBps,
+        ResolveLinkBandwidthBps(egressIf)
+      );
+    }
+    double capacityNorm = clamp01(safe(bwBps / maxEgressBandwidthBps));
+    double headroom = clamp01(capacityNorm * (1.0 - T_port));
+
+    // v8: reward and the non-trainable part of the Q advantage use the same
+    // four RL-native signals.  Reordering remains a diagnostic: per-flowlet
+    // route ownership already prevents intra-flowlet path changes, and the
+    // corrected R_norm is normally zero, so including it only contributed an
+    // action-independent constant to every TD target.
+    double w_headroom = 0.6;
+    double w_queue_ema = 0.2;
+    double w_queue_instant = 0.1;
+    double w_queue_trend = 0.1;
+    double r_inst = w_headroom * headroom
+                  + w_queue_ema * st.qSmooth
+                  + w_queue_instant * instantQueueHealth
+                  + w_queue_trend * trendHealth;
     r_inst = clamp01(safe(r_inst));
 
     // 6) 再做一层时间平滑：r = alpha * r_inst + (1-alpha) * r_prev
@@ -922,18 +990,26 @@
     m_prevRByIf[m_lastActionOutIf] = r;
 
     // =========================
-    // 8) CSV 记录：每次 ComputeReward 调用输出一行
+    // 8) CSV 记录：每 10 次 ComputeReward 才输出 1 行（采样减 I/O）
+    // [2026-05-18] 原来每次写 → I/O 占用大；分析够用 7K 行/sw 即可
     // =========================
 
+    static thread_local uint64_t s_csvCtr = 0;
+    s_csvCtr++;
+    bool writeCsv = (s_csvCtr % 10 == 0);
+
     EnsureRewardCsvOpen();
-    if (m_rewardCsvOpened) {
+    if (m_rewardCsvOpened && writeCsv) {
       m_rewardCsv << std::fixed << std::setprecision(9)
                   << now << ","
                   << m_lastActionOutIf << ","
                   << T_port << ","
+                  << capacityNorm << ","
+                  << headroom << ","
                   << st.qSmooth << ","
                   << L << ","
                   << qScore << ","
+                  << queueTrendEncoded << ","
                   << R_norm << ","
                   << R_qcn << ","
                   << r_inst << ","
@@ -975,11 +1051,16 @@
         const double loopr = ((S_back + S_fwd) > 0 ? double(S_back) / double(S_back + S_fwd) : 0.0);
         NS_LOG_UNCOND("[COVER] seen=" << S_seen << " gated=" << S_gated
                         << " bypass=" << S_bypass << " cover=" << cover);
-        // Flowlet 粒度覆盖情况
+        // Flowlet-level route ownership.  fresh_ratio must be one in v8;
+        // fallback_packets must be zero.  reused_packets are continuation
+        // packets inside a flowlet and do not require another Python call.
         const double hold_ratio = (S_flowletNew > 0 ? double(S_gated) / double(S_flowletNew) : 0.0);
         NS_LOG_UNCOND("[FLOWLET] new=" << S_flowletNew
                       << " held=" << S_gated
-                      << " hold_ratio=" << hold_ratio);
+                      << " fresh_ratio=" << hold_ratio
+                      << " reused_packets=" << S_flowletReusePkts
+                      << " dwell_reused_flowlets=" << S_flowletDwellReuse
+                      << " fallback_packets=" << S_flowletFallbackPkts);
         NS_LOG_UNCOND("[LOOP] back=" << S_back << " fwd=" << S_fwd
                         << " ratio=" << loopr);
         NS_LOG_UNCOND("[ADH] chosen=" << S_decChosen
@@ -1124,20 +1205,21 @@
     awin.acks += 1;
     fst.ackCount += 1;
 
-    // Dup/ACK detection: 使用修正后的 ack_seq 和 backstep-only 逻辑
+    // ACK sequence numbers are scoped to a flow, not to an egress port.  v6
+    // compared ack_seq with awin.lastAckNo shared by every flow on the port;
+    // output 568075741 consequently reported R_norm around 0.5 even though
+    // the forwarding path had no loops or action mismatches.
     uint64_t deltaBytes = 0;
     if (ack_seq != 0) {
-      if (ack_seq > awin.lastAckNo) {
-        deltaBytes = ack_seq - awin.lastAckNo;    // 前进
-        awin.lastAckNo = ack_seq;
-        fst.lastAckNo  = ack_seq;
-      } else if (ack_seq < awin.lastAckNo) { // ack_seq < last
-        // backstep：这才计入 dupacks -> emaDup
+      if (ack_seq > fst.lastAckNo) {
+        deltaBytes = ack_seq - fst.lastAckNo;
+        fst.lastAckNo = ack_seq;
+      } else if (ack_seq < fst.lastAckNo) {
+        // Only a per-flow backstep is treated as reordering.  Equal repeated
+        // acknowledgements are common and remain neutral.
         awin.dupacks += 1;
         fst.dupAckCount += 1;
-        // 不更新 lastAckNo
       }
-      // case: ack_seq == awin.lastAckNo (repeat) -> 不做任何事
     }
 
     if (deltaBytes > 0) {
@@ -1200,6 +1282,32 @@
   }
 
 
+  // [Design B 2026-05-14] 计算当前 held packet 在 ECMP 哈希下应该走的 action_id
+  // 与 SwitchNode::DoLbFlowECMP 一致的哈希逻辑（同 seed + 同 hash 函数）
+  uint32_t
+  ConweaveObsManager::ComputeEcmpActionForHeldPacket() const
+  {
+    if (m_overlayNeighbors.empty() || !m_swHeld) return 0;
+
+    union {
+      uint8_t  u8[12];
+      uint32_t u32[3];
+    } buf;
+    buf.u32[0] = m_chHeld.sip;
+    buf.u32[1] = m_chHeld.dip;
+    if (m_chHeld.l3Prot == 0x06) {
+      buf.u32[2] = m_chHeld.tcp.sport | ((uint32_t)m_chHeld.tcp.dport << 16);
+    } else if (m_chHeld.l3Prot == 0x11) {
+      buf.u32[2] = m_chHeld.udp.sport | ((uint32_t)m_chHeld.udp.dport << 16);
+    } else if (m_chHeld.l3Prot == 0xFC || m_chHeld.l3Prot == 0xFD) {
+      buf.u32[2] = m_chHeld.ack.sport | ((uint32_t)m_chHeld.ack.dport << 16);
+    } else {
+      return 0;  // 控制包默认 action 0
+    }
+    uint32_t hashVal = SwitchNode::EcmpHash(buf.u8, 12, m_swHeld->GetEcmpSeed());
+    return hashVal % m_overlayNeighbors.size();
+  }
+
   void
   ConweaveObsManager::NotifyGymCurrentState()
   {
@@ -1261,6 +1369,11 @@
       st.bwBps = ResolveLinkBandwidthBps(outIf);
       st.winStartSec = now;
       st.lastQueueSampleSec = now;
+      int64_t initialQueueBytes = ReadQueueBytes(outIf);
+      if (initialQueueBytes >= 0) {
+        st.lastQueueBytes = static_cast<double>(initialQueueBytes);
+        st.avgQueueBytes = static_cast<double>(initialQueueBytes);
+      }
       const double rtt_sec = std::max(m_rttGuessSec, m_rewardWinSec);
       st.qSteps = BuildQueueStepsBDP(st.bwBps, rtt_sec);
       st.qLmin = st.qSteps.front();
@@ -1317,78 +1430,6 @@
       }
     }
     return 0; // not found
-  }
-
-  // 构造观测：[dstOverlay] + 每邻居出口5维（cost_bytes, ce_local, ce_remote_min, age, cov）
-  std::vector<float>
-  ConweaveObsManager::BuildObservation(int currentDstOverlay) const
-  {
-    std::vector<float> out;
-    out.reserve(1 + m_egressIfs.size() * kFeatsPerEgress);
-
-    // [0] 目的 overlay id
-    out.push_back(static_cast<float>(currentDstOverlay));
-    // [1] lastAction: 上次选择的端口在 egressIfs 中的索引，归一化到 [0,1]
-    {
-      float lastActNorm = 0.0f;
-      if (m_lastActionOutIf != 0) {
-        for (size_t i = 0; i < m_egressIfs.size(); ++i) {
-          if (m_egressIfs[i] == m_lastActionOutIf) {
-            lastActNorm = (m_egressIfs.size() > 1)
-              ? static_cast<float>(i) / static_cast<float>(m_egressIfs.size() - 1)
-              : 0.0f;
-            break;
-          }
-        }
-      }
-      out.push_back(lastActNorm);
-    }
-
-    if (!m_ready) {
-      for (size_t k = 0; k < m_overlayNeighbors.size() * kFeatsPerEgress; ++k) out.push_back(0.0f);
-      return out;
-    }
-
-    // 反查 dstTorId 用于 GetOneHopMetrics
-    uint32_t dstTorId = 0;
-    {
-      auto itSw = m_indexToSwitch.find(currentDstOverlay);
-      if (itSw != m_indexToSwitch.end()) dstTorId = itSw->second;
-    }
-
-    // 每端口 5 维 CONGA 真实特征（全部归一化到 [0,1]）
-    for (uint32_t ifx : m_egressIfs) {
-      float cost_norm = 0.0f;   // 队列字节 / upperBound
-      float ce_local = 0.0f;    // 本地拥塞度
-      float ce_remote = 0.0f;   // 远端最小拥塞
-      float age = 1.0f;         // 远端反馈新鲜度 (0=新, 1=旧)
-      float cov = 0.0f;         // 路径覆盖率
-
-      // 队列字节
-      auto dev = DynamicCast<QbbNetDevice>(m_sw->GetDevice(ifx));
-      if (dev && dev->GetQueue()) {
-        double qb = static_cast<double>(dev->GetQueue()->GetNBytesTotal());
-        cost_norm = (m_upperBound > 0) ? static_cast<float>(std::min(1.0, qb / m_upperBound)) : 0.0f;
-      }
-
-      // CONGA OneHopMetrics
-      if (m_sw && m_sw->m_mmu && dstTorId > 0) {
-        CongaRouting::OneHopMetrics m;
-        if (m_sw->m_mmu->m_congaRouting.GetOneHopMetrics(dstTorId, ifx, &m)) {
-          ce_local  = static_cast<float>(std::min(1.0, std::max(0.0, m.ce_local_norm)));
-          ce_remote = static_cast<float>(std::min(1.0, std::max(0.0, m.ce_remote_min_norm)));
-          age       = static_cast<float>(std::min(1.0, std::max(0.0, m.age_norm)));
-          cov       = static_cast<float>(std::min(1.0, std::max(0.0, m.cov_norm)));
-        }
-      }
-
-      out.push_back(cost_norm);   // 队列占用率 [0,1]
-      out.push_back(ce_local);    // 本地拥塞 [0,1]
-      out.push_back(ce_remote);   // 远端拥塞 [0,1]
-      out.push_back(age);         // 反馈龄期 [0,1]
-      out.push_back(cov);         // 路径覆盖 [0,1]
-    }
-    return out;
   }
 
   float
@@ -1479,6 +1520,8 @@
 
     if (m_pktUidHeld != 0) {
       m_decisionByUid[m_pktUidHeld] = outIf;
+      // [Hold-only 2026-05-13] 标记 RL 直接释放的首包，T_port 只累加这些包字节
+      m_rlHeldUids.insert(m_pktUidHeld);
       m_decChosen++;
       S_decChosen++;
     }
@@ -1529,10 +1572,18 @@
       }
     }
 
+    // [Design A 2026-05-14] Per-flowKey RL preference 设置
+    // 让同一 flowlet 内所有 packet 都跟随首包走 RL 选的 port，消除 intra-flowlet reorder
+    // 这是 Bug #12 的正确修复方式：preference 按 flowKey 而非 dstToR 索引，避免跨 flow contamination
+    if (m_flowletKeyHeld != 0) {
+      m_swHeld->SetRlPreferredForFlow(m_flowletKeyHeld, outIf);
+    }
+
+    // 老接口保留为防御性 dead code（dstOverlay 实际永远 = -1，不会执行）
     auto itTor2 = m_indexToSwitch.find(dstOverlay);
     if (itTor2 != m_indexToSwitch.end()) {
       uint32_t dstToR = itTor2->second;
-      m_swHeld->SetRlPreferredOutIf(dstToR, outIf);  // 告诉路由逻辑优先走这个口
+      m_swHeld->SetRlPreferredOutIf(dstToR, outIf);  // 永远不会被调用
     }
     m_swHeld->RlRelease(m_pktHeld, m_chHeld, outIf);
 

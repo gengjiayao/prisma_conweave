@@ -85,7 +85,7 @@ def DQN_buffer_lighter_model(observation_shape, num_actions, num_nodes, input_si
         concatted = tensors_2_concat[0]
                  
     out = layers.Dense(units=32, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(concatted)
-    out = layers.Dense(num_actions, activation='elu', kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
+    out = layers.Dense(num_actions, activation=None, kernel_initializer='he_uniform', bias_initializer='zeros')(out)
 
     return tf.keras.Model(inputs=inp, outputs=out)
 
@@ -133,7 +133,7 @@ def DQN_buffer_lighter_2_model(observation_shape, num_actions, num_nodes, input_
         concatted = tensors_2_concat[0]
                  
     out = layers.Dense(units=16, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(concatted)
-    out = layers.Dense(num_actions, activation='elu', kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
+    out = layers.Dense(num_actions, activation=None, kernel_initializer='he_uniform', bias_initializer='zeros')(out)
 
     return tf.keras.Model(inputs=inp, outputs=out)
 
@@ -181,7 +181,7 @@ def DQN_buffer_lighter_3_model(observation_shape, num_actions, num_nodes, input_
         concatted = tensors_2_concat[0]
                  
     out = layers.Dense(units=8, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(concatted)
-    out = layers.Dense(num_actions, activation='elu', kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
+    out = layers.Dense(num_actions, activation=None, kernel_initializer='he_uniform', bias_initializer='zeros')(out)
 
     return tf.keras.Model(inputs=inp, outputs=out)
 
@@ -236,7 +236,7 @@ def DQN_buffer_lite_model(observation_shape, num_actions, num_nodes, input_size_
                  
     out = layers.Dense(units=32, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform', input_shape=(None, 32))(concatted)
     out = layers.Dense(units=32, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform', input_shape=(None, 32))(out)
-    out = layers.Dense(num_actions, activation='elu', kernel_initializer='he_uniform', bias_initializer='he_uniform', input_shape=(None, 32))(out)
+    out = layers.Dense(num_actions, activation=None, kernel_initializer='he_uniform', bias_initializer='zeros', input_shape=(None, 32))(out)
     return tf.keras.Model(inputs=inp, outputs=out)
 
 def DQN_buffer_ff_model(observation_shape, num_actions, num_nodes, input_size_splits): # lite 
@@ -264,23 +264,28 @@ def DQN_buffer_ff_model(observation_shape, num_actions, num_nodes, input_size_sp
     inp = layers.Input(shape=observation_shape) 
     out = layers.Dense(units=8, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(inp)
     out = layers.Dense(units=16, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
-    out = layers.Dense(num_actions, activation='elu', kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
+    out = layers.Dense(num_actions, activation=None, kernel_initializer='he_uniform', bias_initializer='zeros')(out)
 
     return tf.keras.Model(inputs=inp, outputs=out)
 
 def DQN_buffer_model(observation_shape, num_actions, num_nodes, input_size_splits):
-    """The DQN buffer model : 
-        - The input : tensor with shape (batch_size, num_actions + 1) containing the : destination of the packet and the length of each output buffer in bytes.
-        - The output : tensor with shape (batch_size, num_actions) containing the estimated delay for routing the packet to an output buffer.
-        - The architecture : 
-            1- Split the input to separate the destination from the output buffers.
-            2- Encode the destination id using one hot encoding.
-            3- Apply a layer Normalisation to the output buffer input. 
-            4- Push each block (destination and output buffers) to a dense layer with size 32.
-            5- Concat the output of each of the two blocks.
-            6- Apply a Dense layer of size 64.
-            7- Apply a Dense layer of size 64.
-            8- Apply a Dense layer of size num_actions.   
+    """Safe permutation-equivariant per-egress Q scorer for rl-core-v8.
+
+    The Q value is decomposed as::
+
+        Q(s, a) = V(s) + native_prior(s, a) + bounded_residual(s, a)
+
+    ``native_prior`` uses only PRISMA's own headroom, queue, and queue-trend
+    signals.  It is not ECMP, CONGA, or an imitation label.  The learned
+    residual remains action- and destination-dependent, but is bounded to
+    +/-0.1.  This keeps RL free to refine close choices while structurally
+    preventing the v7 deployment failure where an overloaded fast link was
+    ranked above an idle slow link.  The common state value remains unbounded
+    so the network can still fit discounted TD returns near 1/(1-gamma).
+
+    ``last_action`` remains in the wire contract for diagnostics and is
+    deliberately excluded from the scorer.  Sharing every action layer keeps
+    the model permutation equivariant and prevents port-identity shortcuts.
 
     Args:
         observation_shape (List): shape of the inputs.
@@ -291,32 +296,122 @@ def DQN_buffer_model(observation_shape, num_actions, num_nodes, input_size_split
     Returns:
         model : keras NN model.
     """
-    inp = layers.Input(shape=observation_shape)
-    one_hot_layer = layers.Lambda(lambda x: K.one_hot(K.cast(x,'int64'), num_nodes))
-    split = SplitLayer(num_or_size_splits=input_size_splits)(inp)
-    
-    tensors_2_concat = []
-    for s in range(len(input_size_splits)):
-        if input_size_splits[s] == 0: continue
+    if len(input_size_splits) != 3 or input_size_splits[0:2] != [1, 1]:
+        raise ValueError(f"Expected [1, 1, N*K] input splits, got {input_size_splits}")
+    payload_dim = int(input_size_splits[2])
+    if payload_dim <= 0 or payload_dim % int(num_actions) != 0:
+        raise ValueError(
+            f"Egress payload {payload_dim} is not divisible by {num_actions} actions"
+        )
+    features_per_egress = payload_dim // int(num_actions)
 
-        if s ==0:
-            flattened_split = layers.Flatten()(one_hot_layer(split[s]))
-        else:
-            flattened_split = layers.LayerNormalization(center=False, scale=False, trainable=False, axis=1)(split[s])
+    inp = layers.Input(shape=observation_shape, name="observation")
+    destination, _, egress_flat = SplitLayer(
+        num_or_size_splits=input_size_splits,
+        name="observation_split",
+    )(inp)
 
-        out_split = layers.Dense(units=32, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(flattened_split)
-        tensors_2_concat.append(out_split)
-    
-    if len(tensors_2_concat) > 1:    
-        concatted = layers.Concatenate(axis=1)(tensors_2_concat)
-    else:
-        concatted = tensors_2_concat[0]
-                 
-    out = layers.Dense(units=64, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(concatted)
-    out = layers.Dense(units=64, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
-    out = layers.Dense(num_actions, activation='elu', kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
+    destination_one_hot = layers.Lambda(
+        lambda x: K.one_hot(K.cast(x, "int64"), num_nodes),
+        name="destination_one_hot",
+    )(destination)
+    destination_context = layers.Dense(
+        16,
+        activation="elu",
+        kernel_initializer="he_uniform",
+        bias_initializer="zeros",
+        name="destination_context",
+    )(layers.Flatten()(destination_one_hot))
 
-    return tf.keras.Model(inputs=inp, outputs=out)
+    egress_features = layers.Reshape(
+        (num_actions, features_per_egress),
+        name="egress_features",
+    )(egress_flat)
+    global_context = layers.Dense(
+        16,
+        activation="elu",
+        kernel_initializer="he_uniform",
+        bias_initializer="zeros",
+        name="global_egress_context",
+    )(layers.GlobalAveragePooling1D()(egress_features))
+    context = layers.Concatenate(name="global_context")(
+        [destination_context, global_context]
+    )
+    context_per_action = layers.RepeatVector(
+        num_actions,
+        name="context_per_action",
+    )(context)
+
+    state_value_hidden = layers.Dense(
+        32,
+        activation="elu",
+        kernel_initializer="he_uniform",
+        bias_initializer="zeros",
+        name="state_value_hidden",
+    )(context)
+    state_value = layers.Dense(
+        1,
+        activation=None,
+        kernel_initializer=tf.keras.initializers.RandomUniform(-3e-3, 3e-3),
+        bias_initializer="zeros",
+        name="state_value",
+    )(state_value_hidden)
+    state_value_per_action = layers.Reshape(
+        (num_actions,),
+        name="state_value_per_action",
+    )(layers.RepeatVector(num_actions)(state_value))
+
+    # Features are ordered by rl_contract.EGRESS_FEATURE_NAMES:
+    # queue_occupancy, queue_ema, dre_utilization, queue_trend,
+    # headroom, link_capacity.  Headroom already contains both relative
+    # capacity and DRE utilization, so capacity is not counted twice.
+    native_prior = layers.Lambda(
+        lambda x: (
+            0.6 * x[..., 4]
+            + 0.2 * (1.0 - x[..., 1])
+            + 0.1 * (1.0 - x[..., 0])
+            + 0.1 * (1.0 - x[..., 3])
+        ),
+        name="rl_native_action_prior",
+    )(egress_features)
+
+    candidates = layers.Concatenate(axis=-1, name="action_candidates")(
+        [egress_features, context_per_action]
+    )
+    candidates = layers.Dense(
+        64,
+        activation="elu",
+        kernel_initializer="he_uniform",
+        bias_initializer="zeros",
+        name="shared_action_hidden_1",
+    )(candidates)
+    candidates = layers.Dense(
+        32,
+        activation="elu",
+        kernel_initializer="he_uniform",
+        bias_initializer="zeros",
+        name="shared_action_hidden_2",
+    )(candidates)
+    residual_raw = layers.Dense(
+        1,
+        activation="tanh",
+        kernel_initializer=tf.keras.initializers.RandomUniform(-3e-3, 3e-3),
+        bias_initializer="zeros",
+        name="learned_action_residual_raw",
+    )(candidates)
+    residual = layers.Reshape(
+        (num_actions,),
+        name="learned_action_residual_flat",
+    )(residual_raw)
+    residual = layers.Lambda(
+        lambda x: 0.1 * x,
+        name="bounded_action_residual",
+    )(residual)
+    q_values = layers.Add(name="q_values")(
+        [state_value_per_action, native_prior, residual]
+    )
+
+    return tf.keras.Model(inputs=inp, outputs=q_values, name="safe_shared_egress_dqn")
 
 def DQN_buffer_FP_model(observation_shape, num_actions, num_nodes, input_size_splits):
     """The DQN buffer model with fingerprint: 
@@ -366,7 +461,7 @@ def DQN_buffer_FP_model(observation_shape, num_actions, num_nodes, input_size_sp
                  
     out = layers.Dense(units=64, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(concatted)
     out = layers.Dense(units=64, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
-    out = layers.Dense(num_actions, activation='elu', kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
+    out = layers.Dense(num_actions, activation=None, kernel_initializer='he_uniform', bias_initializer='zeros')(out)
 
     return tf.keras.Model(inputs=inp, outputs=out)
 
@@ -400,7 +495,6 @@ def DQN_routing_model(observation_shape, num_actions, num_nodes, input_size_spli
 
     out = layers.Dense(units=64, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(concatted)
     out = layers.Dense(units=64, activation="elu", kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
-    out = layers.Dense(num_actions, activation='elu', kernel_initializer='he_uniform', bias_initializer='he_uniform')(out)
+    out = layers.Dense(num_actions, activation=None, kernel_initializer='he_uniform', bias_initializer='zeros')(out)
 
     return tf.keras.Model(inputs=inp, outputs=out)
-

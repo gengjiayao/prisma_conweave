@@ -57,7 +57,6 @@ class SwitchNode : public Node {
     int GetOutDev(Ptr<Packet>, CustomHeader &ch);
     void SendToDev(Ptr<Packet> p, CustomHeader &ch);
     
-    static uint32_t EcmpHash(const uint8_t *key, size_t len, uint32_t seed);
     void CheckAndSendPfc(uint32_t inDev, uint32_t qIndex);
     void CheckAndSendResume(uint32_t inDev, uint32_t qIndex);
 
@@ -88,8 +87,23 @@ class SwitchNode : public Node {
     // 7 == RL 覆写模式；0 表示“跟随全局 Settings::lb_mode”（默认）
     uint32_t m_lbMode = 0;
 
-    // dstToR -> outIf（只消费一次）
+    // dstToR -> outIf（只消费一次）— 旧接口，保留但 DoLbRl 不再调用
     std::unordered_map<uint32_t, uint32_t> m_rlPreferOnce;
+
+    // [Design A 2026-05-14] Per-flowKey 路由表
+    // Key = ConWeaveRouting::GetFlowKey(sip, dip, sport, dport) 的 5-tuple 哈希
+    // Value = (RL 选的 outIf, 最后访问时间秒数)
+    // 设计目标：同一 flowlet 内所有包都跟随首包走 RL 的 port，消除 intra-flowlet reorder
+    struct FlowletRoutePref {
+      uint32_t outIf;
+      double   last_access_sec;
+    };
+    std::unordered_map<uint64_t, FlowletRoutePref> m_rlPrefByFlow;
+    // Defensive cache only: the ObsManager owns normal v8 continuation
+    // routing directly.  Match its 20 us flowlet boundary so this cache can
+    // never preserve an action into a later flowlet.
+    static constexpr double kFlowletPrefTTL = 20e-6;
+    static constexpr size_t kFlowletPrefSizeCap = 50000; // 触发清理的上限
 
 
    public:
@@ -124,6 +138,19 @@ class SwitchNode : public Node {
     void SetRlPreferredOutIf(uint32_t dstTorId, uint32_t outIf);
     // 如果存在一次性首选端口，返回 true 并通过 outIfOut 给出，同时从表中移除（只消费一次）
     bool TryConsumeRlPreferredOutIf(uint32_t dstTorId, uint32_t &outIfOut);
+
+    // [Design A 2026-05-14] Per-flowKey 路由表接口
+    // SetRlPreferredForFlow: RL 对某 flow 做出决策后调用（在 ApplyAction 里）
+    void SetRlPreferredForFlow(uint64_t flowKey, uint32_t outIf);
+    // LookupRlPreferredForFlow: DoLbRl 中按 flowKey 查找 RL 选的 port
+    // 含 refresh-on-access 语义：访问时刷新 last_access_sec，长 flowlet 不会被截断
+    bool LookupRlPreferredForFlow(uint64_t flowKey, uint32_t &outIfOut);
+    // CleanupExpiredFlowPref: 清理过期 entry（在 Set 时若 size 超上限触发）
+    void CleanupExpiredFlowPref();
+
+    // [Design B 2026-05-14] Warm-start IL: 暴露 ECMP seed + EcmpHash 让 obs-manager 计算同步的 ECMP 期望动作
+    uint32_t GetEcmpSeed() const { return m_ecmpSeed; }
+    static uint32_t EcmpHash(const uint8_t *key, size_t len, uint32_t seed);
 
     // -- 用于跨模块更新 RL 统计的静态函数 --
     static void IncrementRlHeld();

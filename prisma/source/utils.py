@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
 from networkx.algorithms.clique import number_of_cliques
 import tensorflow as tf
+import json
 import os, multiprocessing, shutil
 import numpy as np
 import math
+import re
+
+from source.rl_contract import (
+    checkpoint_manifest,
+    preprocess_observation,
+)
 
 __author__ = "Redha A. Alliche, Tiago Da Silva Barros, Ramon Aparicio-Pardo, Lucile Sassatelli"
 __copyright__ = "Copyright (c) 2022 Redha A. Alliche, Tiago Da Silva Barros, Ramon Aparicio-Pardo, Lucile Sassatelli"
@@ -68,8 +75,20 @@ def save_all_models(actors, overlay_nodes, path, t, num_episodes, root="saved_mo
     """
     for i in overlay_nodes:
         save_model(actors[i], i, path, t, num_episodes, root, snapshot)
-        
-def load_model(path, node_index=-1):
+
+    path = path.rstrip('/') + '/'
+    if snapshot:
+        folder_name = root + path + f"episode_{num_episodes}_step_{t}"
+    else:
+        folder_name = root + path + "final"
+    manifest = checkpoint_manifest()
+    manifest["nodes"] = [int(i) for i in overlay_nodes]
+    os.makedirs(folder_name, exist_ok=True)
+    with open(os.path.join(folder_name, "checkpoint_manifest.json"), "w") as manifest_file:
+        json.dump(manifest, manifest_file, indent=2, sort_keys=True)
+
+
+def load_model(path, node_index=-1, expected_contract_version=None):
     """
     Loads the list of agents from a directory
 
@@ -84,10 +103,34 @@ def load_model(path, node_index=-1):
 
     """
     from source.models import SplitLayer
-    folders = os.listdir(path)
-    q_functions = [1]*len(folders)
+
+    if expected_contract_version is not None:
+        manifest_path = os.path.join(path, "checkpoint_manifest.json")
+        if not os.path.isfile(manifest_path):
+            raise ValueError(
+                "Checkpoint has no RL contract manifest and is incompatible with "
+                f"{expected_contract_version}. Retrain it with the current RL core."
+            )
+        with open(manifest_path, "r") as manifest_file:
+            manifest = json.load(manifest_file)
+        actual_version = manifest.get("rl_core_version")
+        if actual_version != expected_contract_version:
+            raise ValueError(
+                f"Checkpoint contract {actual_version!r} does not match "
+                f"{expected_contract_version!r}."
+            )
+
+    node_folders = []
     for item in os.listdir(path):
-        index = int(item.split("_")[-1][4:])
+        match = re.fullmatch(r"node(\d+)", item)
+        if match and os.path.isdir(os.path.join(path, item)):
+            node_folders.append((int(match.group(1)), item))
+    if not node_folders:
+        raise ValueError(f"No node model directories found in {path}")
+
+    max_index = max(index for index, _ in node_folders)
+    q_functions = [None] * (max(max_index, int(node_index)) + 1)
+    for index, item in node_folders:
         if node_index >= 0 and node_index != index:
             continue
         try :
@@ -95,7 +138,7 @@ def load_model(path, node_index=-1):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            print(e)
+            raise RuntimeError(f"Failed to load node {index} from {path}") from e
     return q_functions
 
 class LinearSchedule(object):
@@ -159,44 +202,15 @@ def convert_bps_to_data_rate(bps):
     return data_rate*p
 
 def normalize_obs(obs: np.ndarray, dst_scale: float = None, feat_scale: float = None) -> np.ndarray:
+    """Backward-compatible entry point for the RL observation contract.
+
+    ``dst_scale`` is intentionally ignored: destination IDs are categorical and
+    must remain raw integers for the model's one-hot encoder.  The active
+    simulator path emits six bounded uint32 egress features at fixed scale 5000;
+    ``feat_scale`` is retained only to validate that producer contract.
     """
-    Normalize observation values to reduce scale mismatch.
-
-    Expected obs layout: [dstOverlay, feat_1, feat_2, ...].
-    """
-    if obs is None:
-        return obs
-    try:
-        arr = np.asarray(obs, dtype=float)
-    except Exception:
-        arr = np.asarray(obs)
-
-    dst_default = 64.0
-    feat_default = 5000.0  # BDP for 1Gbps RTT=8.32us, was 1e6 (collapsed all CONGA features to ~0)
-    dst_scale = float(os.getenv("PRISMA_OBS_DST_SCALE", dst_default if dst_scale is None else dst_scale))
-    feat_scale = float(os.getenv("PRISMA_OBS_FEAT_SCALE", feat_default if feat_scale is None else feat_scale))
-    if dst_scale <= 0:
-        dst_scale = dst_default
-    if feat_scale <= 0:
-        feat_scale = feat_default
-
-    if arr.ndim == 1:
-        if arr.size == 0:
-            return arr
-        out = arr.copy()
-        out[0] = out[0] / dst_scale
-        if out.size > 1:
-            out[1:] = out[1:] / feat_scale
-        return out
-    if arr.ndim == 2:
-        if arr.shape[1] == 0:
-            return arr
-        out = arr.copy()
-        out[:, 0] = out[:, 0] / dst_scale
-        if out.shape[1] > 1:
-            out[:, 1:] = out[:, 1:] / feat_scale
-        return out
-    return arr
+    del dst_scale
+    return preprocess_observation(obs, feature_scale=feat_scale)
 
 def optimal_routing_decision(graph, routing_mat, rejected_mat, actual_node, src_node, dst_node, tag):
     """Compute the action based on the optimal solution
