@@ -1,4 +1,5 @@
 #include "rdma-hw.h"
+#include "routing-diagnostics.h"
 
 #include <ns3/ipv4-header.h>
 #include <ns3/seq-ts-header.h>
@@ -325,7 +326,11 @@ int RdmaHw::ReceiveUdp(Ptr<Packet> p, CustomHeader &ch) {
     }
 
     bool cnp_check = false;
+    uint32_t diagnosticExpected = rxQp->ReceiverNextExpectedSeq;
     int x = ReceiverCheckSeq(ch.udp.seq, rxQp, payload_size, cnp_check);
+    RoutingDiagnostics::Receive(ch.sip, ch.udp.seq, diagnosticExpected, payload_size,
+                                ecnbits != 0, cnp_check);
+    if (RoutingDiagnostics::enabled && !RoutingDiagnostics::oooCnp) cnp_check = false;
 
     if (x == 1 || x == 2 || x == 6) {  // generate ACK or NACK
         qbbHeader seqh;

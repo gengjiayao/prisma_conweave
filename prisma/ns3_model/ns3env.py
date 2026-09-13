@@ -52,7 +52,7 @@ class Ns3ZmqBridge(object):
             elif port == 0 and not self.startSim:
                 print("Cannot use port %s to bind" % str(port) )
                 print("Please specify correct port" )
-                sys.exit()
+                raise RuntimeError("Unable to bind the ns3-gym socket")
 
             else:
                 self.socket.bind ("tcp://*:%s" % str(port))
@@ -62,7 +62,7 @@ class Ns3ZmqBridge(object):
         except Exception as e:
             print("Cannot bind to tcp://*:%s as port is already in use" % str(port) )
             print("Please specify different port or use 0 to get free port" )
-            sys.exit()
+            raise RuntimeError("Unable to bind the ns3-gym socket")
 
         if (startSim == True and simSeed == 0):
             maxSeed = np.iinfo(np.uint32).max

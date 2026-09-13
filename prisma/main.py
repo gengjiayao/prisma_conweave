@@ -51,12 +51,19 @@ def _stop_owned_process(proc, timeout=5.0):
         proc.wait(timeout=timeout)
 
 
+_owned_ns3_process = None
+
 def main():
+    global _owned_ns3_process
     ## Allocate GPU memory as needed
     allocate_on_gpu()
     
     ## Get the arguments from the parser
     params = parse_arguments()
+
+    runtime_contract = checkpoint_manifest(
+        flowlet_gap_us=params.get("rl_flowlet_gap_us") or 20.0,
+        dre_tau_us=params.get("rl_dre_tau_us") or 1000.0)
 
     # 安全除法，避免 0 作分母导致崩溃
     def safe_div(num, den):
@@ -239,6 +246,7 @@ def main():
         ## run ns3 simulator
         print("running ns-3")
         ns3_proc = run_ns3(params) #此处调用run_ns3启动原PRISMA的ns3部分！！！
+        _owned_ns3_process = ns3_proc
         Agent.reset()
         ## run the agents threads
         enabled_nodes = _parse_leaf_overlay_indices(
@@ -257,7 +265,10 @@ def main():
             else:
                 forwarders[index].reset(init=False)
             ## start the agent forwarder thread
-            th1 = threading.Thread(target=forwarders[index].run, args=())
+            # Normal completion still waits for all forwarders below. If a
+            # later leaf fails during setup, blocked socket workers must not
+            # prevent the failing process from exiting after owned cleanup.
+            th1 = threading.Thread(target=forwarders[index].run, args=(), daemon=True)
             th1.start()
             forwarder_threads.append(th1)
             if params["train"]:
@@ -286,7 +297,7 @@ def main():
                 if params["snapshot_interval"] > 0 and Agent.curr_time > 0:
                     if (Agent.base_curr_time + Agent.curr_time) > (snapshot_index * params["snapshot_interval"]):
                         print(f"Saving model at time {Agent.curr_time} with index {snapshot_index}")
-                        save_all_models(Agent.agents, list(forwarders.keys()), params["session_name"], snapshot_index, 1, root=params["logs_parent_folder"] + "/saved_models/", snapshot=True)
+                        save_all_models(Agent.agents, list(forwarders.keys()), params["session_name"], snapshot_index, 1, root=params["logs_parent_folder"] + "/saved_models/", snapshot=True, runtime_contract=runtime_contract)
                         snapshot_index += 1
                         
         print(f""" Summary of the Episode {episode}:
@@ -392,6 +403,8 @@ def main():
             "observation": forwarder.observation_diagnostics(),
             "reward_by_action": forwarder.reward_diagnostics(),
             "q_values": forwarder.q_diagnostics(),
+            "route_changes": dict(forwarder.route_change_stats),
+            "flow_hash_diversity": dict(forwarder.balance_stats),
             "training": (
                 trainers[index].training_stats() if index in trainers else None
             ),
@@ -406,8 +419,12 @@ def main():
     eval_prior_only = bool(params.get("eval_prior_only", 0))
     if params["train"]:
         fct_policy = "epsilon_greedy_training"
+    elif params["eval_score_mode"] != "native":
+        fct_policy = "diagnostic_" + params["eval_score_mode"]
     elif eval_prior_only:
-        fct_policy = "rl_native_prior_only"
+        fct_policy = "rl_native_prior_hysteresis" if params['eval_switch_margin'] else "rl_native_prior_only"
+        if params['eval_balance_band']:
+            fct_policy = "rl_native_prior_balanced"
     elif float(params.get("eval_epsilon", 0.0)) == 0.0:
         fct_policy = "greedy_frozen"
     else:
@@ -420,11 +437,16 @@ def main():
                 "train": int(bool(params["train"])),
                 "eval_epsilon": float(params.get("eval_epsilon", 0.0)),
                 "eval_prior_only": int(eval_prior_only),
+                "eval_switch_margin": params['eval_switch_margin'],
+                "eval_balance_band": params['eval_balance_band'],
                 "fct_policy": fct_policy,
+                "score_mode": params["eval_score_mode"],
+                "diagnostic_policy": {"mode": params["eval_score_mode"], **Agent.eval_delay_settings},
                 "fct_is_final_checkpoint_policy": bool(
                     not params["train"]
                     and float(params.get("eval_epsilon", 0.0)) == 0.0
                     and not eval_prior_only
+                    and params["eval_score_mode"] == "native"
                 ),
                 "nodes": policy_action_stats,
             },
@@ -436,7 +458,7 @@ def main():
 
     traffic_seed = params.get("traffic_seed")
     traffic_seed = None if traffic_seed is None else int(traffic_seed)
-    run_manifest = checkpoint_manifest()
+    run_manifest = dict(runtime_contract)
     run_manifest.update({
         "seed": int(params["seed"]),
         "traffic_seed": traffic_seed,
@@ -446,7 +468,13 @@ def main():
         "evaluation": {
             "eval_epsilon": float(params.get("eval_epsilon", 0.0)),
             "eval_prior_only": int(eval_prior_only),
+            "eval_switch_margin": params['eval_switch_margin'],
+            "eval_balance_band": params['eval_balance_band'],
             "fct_policy": fct_policy,
+            "score_mode": params["eval_score_mode"],
+            "diagnostic_policy": dict(Agent.eval_delay_settings),
+            "flowlet_gap_us": params.get("rl_flowlet_gap_us") or 20.0,
+            "dre_tau_us": params.get("rl_dre_tau_us") or 1000.0,
         },
         "optimization": {
             "batch_size": int(params["batch_size"]),
@@ -486,7 +514,7 @@ def main():
     ## save models        
     #if params["save_models"] and Agent.curr_time >= params["simTime"]-5:
     if params["save_models"] and (Agent.curr_time > 0 or Agent.nb_transitions > 0):
-        save_all_models(Agent.agents, list(forwarders.keys()), params["session_name"], 1, 1, root=params["logs_parent_folder"] + "/saved_models/", snapshot=False)
+        save_all_models(Agent.agents, list(forwarders.keys()), params["session_name"], 1, 1, root=params["logs_parent_folder"] + "/saved_models/", snapshot=False, runtime_contract=runtime_contract)
 
     ## save the profiler results
     if params["profile_session"]:
@@ -531,7 +559,7 @@ if __name__ == '__main__':
         # 3) Reap the owned launcher; terminate its process group only if it
         # is still alive.  Keeping the Popen handle avoids zombie children.
         try:
-            _stop_owned_process(ns3_proc)
+            _stop_owned_process(ns3_proc or _owned_ns3_process)
         except Exception:
             pass
 

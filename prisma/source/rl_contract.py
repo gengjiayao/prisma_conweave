@@ -253,12 +253,15 @@ def should_update_target(gradient_steps: int, interval: int) -> bool:
     return gradient_steps > 0 and gradient_steps % interval == 0
 
 
-def checkpoint_manifest() -> dict:
+def checkpoint_manifest(flowlet_gap_us=20.0, dre_tau_us=1000.0) -> dict:
+    if not np.isfinite(flowlet_gap_us) or flowlet_gap_us <= 0 or not np.isfinite(dre_tau_us) or dre_tau_us <= 0:
+        raise ValueError('Checkpoint timing values must be finite and positive')
     return {
         "rl_core_version": RL_CORE_VERSION,
         "observation": {
             "producer": "PrepareAndSendObservation_rl_native_uint32_quantized",
             "state_source": "rl_mac_tx_dre_local_queue",
+            "dre_time_constant_seconds": float(dre_tau_us) * 1e-6,
             "layout": "[destination_overlay,last_action_index]+N*6_uint32_egress_features",
             "egress_features": list(EGRESS_FEATURE_NAMES),
             "destination_encoding": "raw_integer_one_hot",
@@ -281,7 +284,7 @@ def checkpoint_manifest() -> dict:
             "reorder_role": "diagnostic_only_per_flowlet_route_ownership",
         },
         "flowlet_routing": {
-            "boundary_seconds": 20e-6,
+            "boundary_seconds": float(flowlet_gap_us) * 1e-6,
             "fresh_action_each_new_flowlet": True,
             "additional_dwell_seconds": 0.0,
             "continuation_route_owner": "rl_flowlet_context",

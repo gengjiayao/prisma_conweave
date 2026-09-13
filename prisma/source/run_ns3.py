@@ -98,6 +98,11 @@ def run_ns3(params, configure=True):
         )
         if params.get(name) is not None
     )
+    rl_timing_args = "".join(f"--{k} {float(params[k])} " for k in ("rl_flowlet_gap_us", "rl_dre_tau_us") if params.get(k) is not None)
+    binary_arg = (
+        f'--ns3_binary {shlex.quote(params["ns3_binary"])} '
+        if params.get("ns3_binary") else ""
+    )
     runpy_cmd = (
         f'python3 run.py '
         f'--cc {params["cc"]} '
@@ -114,6 +119,8 @@ def run_ns3(params, configure=True):
         f'--sw_monitoring_interval {params["sw_monitoring_interval"]} '
         f'--seed {params["seed"]} '
         f'{traffic_seed_arg}'
+        f'{binary_arg}'
+        f'{rl_timing_args}'
         f'{conweave_timing_args}'
         f'--session_name {params["session_name"]} '
         f'--basePort {params["basePort"]} '

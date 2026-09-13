@@ -59,6 +59,8 @@ public:
     return out;
   }
   bool HasPreparedObservation() const { return m_hasPrepared; }
+  bool CurrentFlowletHasPreviousAction() const;
+  uint64_t GetCurrentFlowKey() const { return m_flowletKeyHeld; }
 
   uint64_t GetLastPktId()   const { return m_lastPktId; }
   uint32_t GetLastPktSize() const { return m_lastPktSize; }
@@ -69,6 +71,7 @@ public:
   // 清空本次逐跳缓存（动作后调用，防止 post-action 的下一状态复用旧 pkt）
   void ResetPreparedObservation();
 
+  void ConfigureTiming(double flowletGapUs, double dreTauUs);
   double GetObsUpperBound() const { return m_upperBound; }
   float GetReward();
   bool  ApplyAction(uint32_t actionId, int dstOverlay);

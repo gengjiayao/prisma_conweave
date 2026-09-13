@@ -19,6 +19,7 @@
  */
 
 #include "ns3/conga-routing.h"
+#include "routing-diagnostics.h"
 
 #include "assert.h"
 #include "ns3/assert.h"
@@ -156,6 +157,33 @@ void CongaRouting::RouteInput(Ptr<Packet> p, CustomHeader ch) {
      * network and pass with different utility conditions!!
      **/
     if (ch.l3Prot != 0x11) {
+        // Optional stronger comparison: use existing reverse ACK/NACK packets
+        // for feedback, while retaining their ECMP routing and high priority.
+        // The original port only piggybacks on reverse UDP data packets.
+        if (RoutingDiagnostics::congaAckFeedback && m_isToR &&
+            (ch.l3Prot == 0xFC || ch.l3Prot == 0xFD)) {
+            uint32_t src = Settings::hostIp2SwitchId.at(ch.sip);
+            uint32_t dst = Settings::hostIp2SwitchId.at(ch.dip);
+            if (src != dst && src == m_switch_id) {
+                auto table = m_congaFromLeafTable.find(dst);
+                if (table != m_congaFromLeafTable.end() && !table->second.empty()) {
+                    static std::map<std::pair<uint32_t,uint32_t>,uint64_t> cursor;
+                    auto item = table->second.begin();
+                    std::advance(item, cursor[std::make_pair(src,dst)]++ % table->second.size());
+                    CongaTag tag;
+                    tag.SetPathId(CONGA_NULL); tag.SetCe(0); tag.SetHopCount(0);
+                    tag.SetFbPathId(item->first); tag.SetFbMetric(item->second._ce);
+                    p->AddPacketTag(tag);
+                }
+            } else if (src != dst && dst == m_switch_id) {
+                CongaTag tag;
+                if (p->PeekPacketTag(tag) && tag.GetFbPathId() != CONGA_NULL && tag.GetFbMetric() != CONGA_NULL) {
+                    OutpathInfo &entry = m_congaToLeafTable[src][tag.GetFbPathId()];
+                    entry._ce = tag.GetFbMetric(); entry._updateTime = now;
+                    ++RoutingDiagnostics::congaAckUpdates;
+                }
+            }
+        }
         DoSwitchSendToDev(p, ch);
         return;
     }

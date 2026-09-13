@@ -1,5 +1,6 @@
   /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
   #include "conweave-obs-manager.h"
+  #include "diagnostic-expiry.h"
   #include "ns3/log.h"
   #include "ns3/simulator.h"
   #include <algorithm>
@@ -53,6 +54,7 @@
 
       uint64_t max_streak = 0;
       std::unordered_map<uint64_t, FlowSeq> flow_seq; // flowKey -> FlowSeq
+      double oldestTimestamp = std::numeric_limits<double>::infinity();
     };
     std::map<uint32_t, DupAckPortStat> S_dupByIf; // key = outIf
     std::mutex S_dupMutex;
@@ -343,6 +345,14 @@
     m_stepBuffered  = 0;
   }
 
+  bool
+  ConweaveObsManager::CurrentFlowletHasPreviousAction() const
+  {
+    if (!m_hasPrepared) return false;
+    auto it = m_flowlets.find(m_flowletKeyHeld);
+    return it != m_flowlets.end() && it->second.lastActionOutIf > 0;
+  }
+
   // -- 补全：overlay 邻居索引 -> 对齐的 egress ifIndex 映射（防御：越界返回 0）
   uint32_t
   ConweaveObsManager::OverlayNeighborToIfIndex(int overlayNbr) const
@@ -520,6 +530,19 @@
     st.queueIntBytes += currentQueue * dt;
     st.lastQueueSampleSec = nowSec;
     st.lastQueueBytes = currentQueue;
+  }
+
+  void
+  ConweaveObsManager::ConfigureTiming(double flowletGapUs, double dreTauUs)
+  {
+    if (!std::isfinite(flowletGapUs) || flowletGapUs <= 0.0 ||
+        !std::isfinite(dreTauUs) || dreTauUs <= 0.0) {
+      NS_FATAL_ERROR("RL timing values must be finite and positive");
+    }
+    m_flowletGapSec = flowletGapUs * 1e-6;
+    m_dreTau = dreTauUs * 1e-6;
+    std::clog << "[RL-TIMING] flowlet_gap_us=" << flowletGapUs
+              << " dre_tau_us=" << dreTauUs << std::endl;
   }
 
   double
@@ -791,7 +814,7 @@
   //                      << " match=" << S_decMatch
   //                      << " mismatch=" << S_decMismatch
   //                      << " ratio=" << (S_decChosen ? double(S_decMatch) / S_decChosen : 0.0)
-  //                      << " observed=" << (S_decChosen ? double(S_decMatch + S_decMismatch) / S_decChosen : 0.0));
+  //                      << " observed=" << (S_decChosen ? double(S_decMatch + S_decMismatch) / S_decChosen : 0.0) << std::endl;
 
   //       NS_LOG_UNCOND("[LOOP-LONG] sample=" << S_longLoopSample
   //                      << " hit=" << S_longLoopHit
@@ -1055,19 +1078,19 @@
         // fallback_packets must be zero.  reused_packets are continuation
         // packets inside a flowlet and do not require another Python call.
         const double hold_ratio = (S_flowletNew > 0 ? double(S_gated) / double(S_flowletNew) : 0.0);
-        NS_LOG_UNCOND("[FLOWLET] new=" << S_flowletNew
+        std::clog << "[FLOWLET] new=" << S_flowletNew
                       << " held=" << S_gated
                       << " fresh_ratio=" << hold_ratio
                       << " reused_packets=" << S_flowletReusePkts
                       << " dwell_reused_flowlets=" << S_flowletDwellReuse
-                      << " fallback_packets=" << S_flowletFallbackPkts);
+                      << " fallback_packets=" << S_flowletFallbackPkts << std::endl;
         NS_LOG_UNCOND("[LOOP] back=" << S_back << " fwd=" << S_fwd
                         << " ratio=" << loopr);
-        NS_LOG_UNCOND("[ADH] chosen=" << S_decChosen
+        std::clog << "[ADH] chosen=" << S_decChosen
                       << " match=" << S_decMatch
                       << " mismatch=" << S_decMismatch
                       << " ratio=" << (S_decChosen ? double(S_decMatch) / S_decChosen : 0.0)
-                      << " observed=" << (S_decChosen ? double(S_decMatch + S_decMismatch) / S_decChosen : 0.0));
+                      << " observed=" << (S_decChosen ? double(S_decMatch + S_decMismatch) / S_decChosen : 0.0) << std::endl;
 
         NS_LOG_UNCOND("[LOOP-LONG] sample=" << S_longLoopSample
                       << " hit=" << S_longLoopHit
@@ -1161,15 +1184,7 @@
 
       // TTL/LRU, a simple version to control memory
       const double kFlowSeqTtl = 0.1; // 100ms
-      if (st.flow_seq.size() > 10000) {
-          for (auto it = st.flow_seq.begin(); it != st.flow_seq.end(); ) {
-              if (now - it->second.ts > kFlowSeqTtl) {
-                  it = st.flow_seq.erase(it);
-              } else {
-                  ++it;
-              }
-          }
-      }
+      PruneDiagnosticFlowSequences(st.flow_seq, now, kFlowSeqTtl, st.oldestTimestamp);
 
       auto &fs = st.flow_seq[flowKey];
       
@@ -1188,6 +1203,7 @@
         // 不更新 fs.last_seq，保持“最近前进”的基准
       }
       fs.ts = now;
+      st.oldestTimestamp = std::min(st.oldestTimestamp, now);
     }
 
     if (m_portStats.find(outIf) == m_portStats.end()) m_portStats[outIf] = EgressPortStats();

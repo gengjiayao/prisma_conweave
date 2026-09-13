@@ -1,0 +1,232 @@
+{
+  "scope": "Frozen selected policies after repairing remote-state transport; no additional RL training or checkpoint selection.",
+  "hosts": 128,
+  "leaf_switches": 8,
+  "spine_switches": 8,
+  "workloads": [
+    "uniform",
+    "storage",
+    "sweep",
+    "mixed",
+    "mixed_fast"
+  ],
+  "traffic_seeds": [
+    86001,
+    86002,
+    86003,
+    86004,
+    86005,
+    86006,
+    86007,
+    86008,
+    86009,
+    86010,
+    86011,
+    86012
+  ],
+  "primary_runs": 240,
+  "models": [
+    {
+      "fit": 9101,
+      "path": "policies/real-s9101.txt",
+      "sha256": "8ef5dd61af76c05a31932fffdabc2e5901abd7bc0c75a573806330a846f956b6"
+    },
+    {
+      "fit": 9102,
+      "path": "policies/real-s9102.txt",
+      "sha256": "ceab00f39a14f6e483b185c0c2fdc28c19eafdeac1c0012f87961430c2a0555e"
+    },
+    {
+      "fit": 9103,
+      "path": "policies/real-s9103.txt",
+      "sha256": "f3b3dfa32e284f1a28a93addda84627c415408718b30989274a956e1d7b2aff7"
+    }
+  ],
+  "wire": {
+    "bytes_per_report": 194,
+    "previous_bytes_per_report": 80,
+    "period_us": 200,
+    "per_link_mbps": 7.76,
+    "received": 4321984,
+    "malformed": 0,
+    "reordered_or_duplicate": 0
+  },
+  "completion": {
+    "real": {
+      "runs": 180,
+      "offered": 1332357,
+      "completed": 1332357
+    },
+    "conga": {
+      "runs": 60,
+      "offered": 444119,
+      "completed": 444119
+    }
+  },
+  "conga_exact_replays": 60,
+  "statistics": {
+    "conga": {
+      "all_mean_us": {
+        "delta_pct": -21.30827684934122,
+        "ci95_pct": [
+          -21.6204435076558,
+          -20.898717899639994
+        ],
+        "per_family_pct": {
+          "uniform": -48.03118741407742,
+          "storage": -13.271836458356079,
+          "sweep": -5.090637992138023,
+          "mixed": -17.4697333456068,
+          "mixed_fast": -14.528754967176116
+        },
+        "per_fit_pct": {
+          "9101": -21.41689501464726,
+          "9102": -21.094795740305415,
+          "9103": -21.41270635562115
+        }
+      },
+      "all_p99_us": {
+        "delta_pct": -17.570152885042774,
+        "ci95_pct": [
+          -18.034410741424253,
+          -17.024735807750865
+        ],
+        "per_family_pct": {
+          "uniform": -47.57405905752355,
+          "storage": -8.447325507019842,
+          "sweep": -2.719025792544839,
+          "mixed": -9.391685252057913,
+          "mixed_fast": -10.048328469223007
+        },
+        "per_fit_pct": {
+          "9101": -17.74430838449223,
+          "9102": -17.384803272405254,
+          "9103": -17.580953981205283
+        }
+      },
+      "makespan_us": {
+        "delta_pct": -1.5675761633920011,
+        "ci95_pct": [
+          -3.5451793478445515,
+          0.3953810342130929
+        ],
+        "per_family_pct": {
+          "uniform": -8.514978838525696,
+          "storage": 0.3858044137077458,
+          "sweep": -1.2904611765432048,
+          "mixed": 2.844890936717037,
+          "mixed_fast": -0.8878821825642138
+        },
+        "per_fit_pct": {
+          "9101": -1.9586656850131667,
+          "9102": -0.9878332026265616,
+          "9103": -1.7535740537132742
+        }
+      }
+    },
+    "old_real": {
+      "all_mean_us": {
+        "delta_pct": 0.6928008630584322,
+        "ci95_pct": [
+          0.4717435028238359,
+          0.9082883131104732
+        ],
+        "per_family_pct": {
+          "uniform": 0.9564271001577059,
+          "storage": 0.2858961649905074,
+          "sweep": 0.6778650887648451,
+          "mixed": 0.8540396838879509,
+          "mixed_fast": 0.6910752426748894
+        },
+        "per_fit_pct": {
+          "9101": 0.598886296394386,
+          "9102": 0.8108435445259785,
+          "9103": 0.668788572373584
+        }
+      },
+      "all_p99_us": {
+        "delta_pct": 0.5495256718067758,
+        "ci95_pct": [
+          0.051541568654218974,
+          1.0350804992771556
+        ],
+        "per_family_pct": {
+          "uniform": 0.5489864837683095,
+          "storage": -0.1465899989953614,
+          "sweep": 1.3781900750162093,
+          "mixed": 0.5079883729246291,
+          "mixed_fast": 0.46491446573023393
+        },
+        "per_fit_pct": {
+          "9101": 0.6458844823213116,
+          "9102": 0.5885348720948534,
+          "9103": 0.4143023765893838
+        }
+      },
+      "makespan_us": {
+        "delta_pct": 0.24452877920089078,
+        "ci95_pct": [
+          -1.6965807905202839,
+          2.112810723476208
+        ],
+        "per_family_pct": {
+          "uniform": 0.18745144775051242,
+          "storage": 1.2682230687881408,
+          "sweep": 0.05201572933227714,
+          "mixed": 1.7028253429671694,
+          "mixed_fast": -1.9476483737165362
+        },
+        "per_fit_pct": {
+          "9101": -0.48832755286277,
+          "9102": 1.4784727305597192,
+          "9103": -0.24513427154072182
+        }
+      }
+    }
+  },
+  "bootstrap": "10000 paired traffic-seed blocks across five fixed families, paired resampling of three model lineages; geometric averaging of metric ratios. No training/selection uncertainty.",
+  "descriptive_size_groups_vs_conga": {
+    "small": {
+      "mean_us": -31.176044002381975,
+      "p99_us": -46.980119645936306
+    },
+    "medium": {
+      "mean_us": -28.360278295790724,
+      "p99_us": -36.903270103487365
+    },
+    "large": {
+      "mean_us": -16.739237879502923,
+      "p99_us": -12.629136750798898
+    }
+  },
+  "local_change": "Retained as constant zero, matching the observations used to train these frozen policies. Enabling it requires new normalization and training.",
+  "validation": {
+    "existing_checks": 67,
+    "additional_tests": [
+      "standalone wire codec/cache with ASan and UBSan",
+      "ns-3 packet reconstructed from bytes with new UID and no tags"
+    ],
+    "branch_checks": [
+      "mode 6 report-based switch decisions",
+      "mode 9 pressure reporting",
+      "mode 9 migration gate: 344 decisions using all 32 input slots"
+    ],
+    "native_primary_runs": 240,
+    "native_smoke_and_branch_runs": 5
+  },
+  "provenance": {
+    "experiment": "rl-wire-feedback-20260913-gu461cjt",
+    "native_binary_sha256": "934f2029733d080b7a3866dbabf7937b419943679412c70567c9204af069a0fb",
+    "native_source_hashes": {
+      "conweave-ns3-main/src/point-to-point/model/route-learning.h": "10de0ceb1c0aa868b002d7495a18ae4e879f36178e5843a4ac944119e80cf83d",
+      "conweave-ns3-main/src/point-to-point/model/route-learning.inc": "ea172d01aac5c185b92be719f73568f62db451e5eeecc8b2ea92222b464fde44",
+      "conweave-ns3-main/src/point-to-point/model/routing-diagnostics.h": "b7e4f61cbfcedb4cbe32cdcc7746e56d3c63ecf0d49720bb9426f927da2df618",
+      "conweave-ns3-main/src/point-to-point/model/switch-node.cc": "0a63935fd127832334deb2ff92025d7ad6b4d1ac412f862e4dfe40d04621c009",
+      "conweave-ns3-main/src/point-to-point/model/switch-node.h": "3f121f95d20caaab9999b7dc681f69e632dee87dc4637728b526e9cc613d997b",
+      "conweave-ns3-main/src/point-to-point/wscript": "efe012d54083b17020acd0252d7c321bb7c04767e593a06f960e8071676ce933",
+      "conweave-ns3-main/src/point-to-point/model/route-feedback.h": "8ffca520b2d5ad51b86eb395d55e518de956851cbd1ca815e226d77e576f605b"
+    },
+    "summary_sha256": "98ba4d3d1eed2ecf33ea18f02b30337ce19b01103c52ddde69043acbee54c379",
+    "note": "Full raw runs, frozen binaries and source snapshot remain in separate experiment storage. Historical selected.json results refer to the former feedback abstraction."
+  }
+}

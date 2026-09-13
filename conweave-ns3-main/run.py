@@ -2,6 +2,7 @@
 from genericpath import exists
 import subprocess
 import os
+import fcntl
 import time
 from xmlrpc.client import boolean
 import numpy as np
@@ -14,10 +15,11 @@ from datetime import datetime
 import sys
 import os
 import argparse
+from simulation_process import binary_identity, execute_simulator, create_run_directory
 from datetime import date
 
 # randomID
-random.seed(datetime.now())
+random.seed(datetime.now().timestamp())
 MAX_RAND_RANGE = 1000000000
 
 #####################################################
@@ -112,6 +114,7 @@ cc_modes = {
 
 lb_modes = {
     "fecmp": 0,
+    "wecmp": 1,
     "drill": 2,
     "conga": 3,
     "letflow": 6,
@@ -123,6 +126,7 @@ topo2bdp = {
     "leaf_spine_128_100G_OS2": 5000,  # 100Gbps RTT=8320ns
     "fat_k8_100G_OS2": 156000,  # 3-tier -> all 100Gbps
     "leaf_spine_128_100G_asym_OS2": 5000,  # asymmetric: spines 140-143 at 500Mbps (adversarial)
+    "leaf_spine_1024_1G_asym_OS2": 5000,  # 64 leaves, eight spines; unchanged rates and path length
 }
 
 FLOWGEN_DEFAULT_TIME = 2.0  # see /traffic_gen/traffic_gen.py::base_t
@@ -176,6 +180,8 @@ def main():
                         default='AliStorage2019', help="the name of the cdf file (default: AliStorage2019)")
     parser.add_argument('--enforce_win', dest='enforce_win', action='store',
                         type=int, default=0, help="enforce to use window scheme (default: 0)")
+    parser.add_argument('--rl_flowlet_gap_us', type=float, default=None, help='RL flowlet gap override in microseconds; default 20')
+    parser.add_argument('--rl_dre_tau_us', type=float, default=None, help='RL load estimator time constant in microseconds; default 1000')
     parser.add_argument('--sw_monitoring_interval', dest='sw_monitoring_interval', action='store',
                         type=int, default=10000, help="interval of sampling statistics for queue status (default: 10000ns)")
     parser.add_argument('--seed', dest='seed', type=int, default=100,
@@ -186,7 +192,7 @@ def main():
                         help="PRISMA session name recorded in the output manifest")
     parser.add_argument('--basePort',dest='basePort', type=int, default=6555, help="zmq base port(default:6555)")
     parser.add_argument('--overlay_mat_file_name',dest='overlay_mat_file_name',default="../prisma/examples/abilene/topology_files/overlay_adjacency_matrix.txt",help="path to the overlay adjacency matrix file")
-    parser.add_argument('--index_to_switch_id_map_file', dest='index_to_switch_id_map_file', default="", help="path to the file mapping RL agent index to switch ID")
+    parser.add_argument('--index_to_switch_id_map_file', dest='index_to_switch_id_map_file', default="../prisma/examples/abilene/topology_files/index2switchid.txt", help="path to the file mapping RL agent index to switch ID")
     print(f"来自PRISMA的命令已经传递到了conweave！！！")
     
     #新流量生成文件参数
@@ -217,7 +223,14 @@ def main():
     parser.add_argument('--cwh_tx_expiry_time', dest='cwh_tx_expiry_time',
                         type=int, default=None, help="inactive-flow expiry time in us")
 
+    parser.add_argument('--ns3_binary', default=None,
+                        help='Run this prebuilt simulator directly; omit to build through waf')
     args = parser.parse_args()
+    if not os.path.isfile(args.index_to_switch_id_map_file):
+        parser.error("Index-to-switch mapping must name an existing file")
+    simulator_identity = binary_identity(args.ns3_binary)
+    if simulator_identity:
+        args.ns3_binary = simulator_identity['path']
     conweave_timing_names = (
         "cwh_extra_reply_deadline",
         "cwh_path_pause_time",
@@ -236,13 +249,9 @@ def main():
 
     # make running ID of this config
     # need to check directory exists or not
-    isExist = True
-    config_ID = 0
-    #out_root = os.path.join(os.getcwd(), "mix", "output")
-    while (isExist):
-        config_ID = str(random.randrange(MAX_RAND_RANGE))
-        run_dir = os.path.join(out_root, config_ID)
-        isExist = os.path.exists(run_dir)
+    reserved_run_dir = create_run_directory(out_root)
+    config_ID = reserved_run_dir.name
+    run_dir = str(reserved_run_dir)
 
     # input parameters
     cc_mode = cc_modes[args.cc]
@@ -336,60 +345,65 @@ def main():
         raise Exception("Unknown traffic_mode: {}".format)
     # check the file exists
     out_path = os.getcwd() + "/config/" + flow + ".txt"
-    if exists(out_path):
-        print("Input traffic file already exists:", out_path)
-    else:
-        print("Generate a input traffic file... ->", out_path)
-        if args.traffic_mode == 'cdf':
-            seed_arg = (
-                ""
-                if args.traffic_seed is None
-                else "--seed {}".format(args.traffic_seed)
-            )
-            cmd = ("python ./traffic_gen/traffic_gen.py "
-                   "-c {cdf} -n {n_host} -l {load} -b {bw} -t {time} "
-                   "-o {output} {seed_arg}").format(
-                cdf=os.getcwd() + "/traffic_gen/" + args.cdf + ".txt",
-                n_host=n_host, load=hostload / 100.0,
-                bw=args.bw + "G", time=args.simul_time, output=out_path,
-                seed_arg=seed_arg)
-        elif args.traffic_mode == 'allreduce':
-            chunk_arg = ("--chunk_bytes {cb}".format(cb=args.ar_chunk_bytes)) if args.ar_chunk_bytes else ""
-            cdf_arg = ("-c " + os.getcwd() + "/traffic_gen/" + args.cdf + ".txt") if not args.ar_chunk_bytes else ""
-            rotate_arg = "--rotate_ring {v}".format(v=int(args.ar_rotate_ring))
-
-            # [修改] 显式传递 -t (时间) 和 -b (带宽)，并处理 rounds 可能为 None 的情况
-            rounds_val = args.ar_rounds if args.ar_rounds is not None else 1000000 # 传个大数让生成器自己按时间切
-
-            cmd = ("python ./traffic_gen/All_Reduce_traffic_gen.py "
-                   "-n {n_host} -b {bw} -t {time} "
-                   "{cdf_arg} --rounds {R} --step_us {S} --jitter_us {J} {chunk_arg} {rotate_arg} "
-                   "-o {output}").format(
-                n_host=n_host, bw=args.bw+"G", time=args.simul_time, 
-                cdf_arg=cdf_arg,
-                R=rounds_val,
-                S=args.ar_step_us, J=args.ar_jitter_us, chunk_arg=chunk_arg,
-                rotate_arg=rotate_arg, output=out_path)
-        elif args.traffic_mode == 'alltoall':
-            cmd = (
-                "python ./traffic_gen/AllToAll_traffic_gen.py "
-                "-n {n_host} -b {bw} -t {time} -o {output} "
-                "--rounds {R} --chunk_bytes {CH} --burst_us {BU}"
-            ).format(
-                n_host=n_host,
-                bw=args.bw + "G",
-                time=args.simul_time,
-                output=out_path,
-                R=args.aa_rounds,
-                CH=args.aa_chunk_bytes,
-                BU=args.aa_burst_us,
-            )
+    with open(out_path + '.lock', 'a') as traffic_lock:
+        fcntl.flock(traffic_lock, fcntl.LOCK_EX)
+        if exists(out_path):
+            print("Input traffic file already exists:", out_path)
         else:
-            raise Exception("Unknown traffic_mode: {}".format(args.traffic_mode))
-        
-        print(cmd)
-        if os.system(cmd) != 0 or not exists(out_path):
-            raise RuntimeError("Traffic generation failed: {}".format(cmd))
+            print("Generate a input traffic file... ->", out_path)
+            if args.traffic_mode == 'cdf':
+                seed_arg = (
+                    ""
+                    if args.traffic_seed is None
+                    else "--seed {}".format(args.traffic_seed)
+                )
+                cmd = ("python ./traffic_gen/traffic_gen.py "
+                       "-c {cdf} -n {n_host} -l {load} -b {bw} -t {time} "
+                       "-o {output} {seed_arg}").format(
+                    cdf=os.getcwd() + "/traffic_gen/" + args.cdf + ".txt",
+                    n_host=n_host, load=hostload / 100.0,
+                    bw=args.bw + "G", time=args.simul_time, output=out_path,
+                    seed_arg=seed_arg)
+            elif args.traffic_mode == 'allreduce':
+                chunk_arg = ("--chunk_bytes {cb}".format(cb=args.ar_chunk_bytes)) if args.ar_chunk_bytes else ""
+                cdf_arg = ("-c " + os.getcwd() + "/traffic_gen/" + args.cdf + ".txt") if not args.ar_chunk_bytes else ""
+                rotate_arg = "--rotate_ring {v}".format(v=int(args.ar_rotate_ring))
+
+                # [修改] 显式传递 -t (时间) 和 -b (带宽)，并处理 rounds 可能为 None 的情况
+                rounds_val = args.ar_rounds if args.ar_rounds is not None else 1000000 # 传个大数让生成器自己按时间切
+
+                cmd = ("python ./traffic_gen/All_Reduce_traffic_gen.py "
+                       "-n {n_host} -b {bw} -t {time} "
+                       "{cdf_arg} --rounds {R} --step_us {S} --jitter_us {J} {chunk_arg} {rotate_arg} "
+                       "-o {output}").format(
+                    n_host=n_host, bw=args.bw+"G", time=args.simul_time,
+                    cdf_arg=cdf_arg,
+                    R=rounds_val,
+                    S=args.ar_step_us, J=args.ar_jitter_us, chunk_arg=chunk_arg,
+                    rotate_arg=rotate_arg, output=out_path)
+            elif args.traffic_mode == 'alltoall':
+                cmd = (
+                    "python ./traffic_gen/AllToAll_traffic_gen.py "
+                    "-n {n_host} -b {bw} -t {time} -o {output} "
+                    "--rounds {R} --chunk_bytes {CH} --burst_us {BU}"
+                ).format(
+                    n_host=n_host,
+                    bw=args.bw + "G",
+                    time=args.simul_time,
+                    output=out_path,
+                    R=args.aa_rounds,
+                    CH=args.aa_chunk_bytes,
+                    BU=args.aa_burst_us,
+                )
+            else:
+                raise Exception("Unknown traffic_mode: {}".format(args.traffic_mode))
+
+            print(cmd)
+            if os.system(cmd) != 0 or not exists(out_path):
+                if exists(out_path):
+                    os.unlink(out_path)
+                raise RuntimeError("Traffic generation failed: {}".format(cmd))
+
 
     # sanity check - bandwidth
     with open("config/{topo}.txt".format(topo=args.topo), 'r') as f_topo:
@@ -471,7 +485,6 @@ def main():
 
     # config_name = os.getcwd() + "/mix/output/" + config_ID + "/config.txt"
     # print("Config filename:{}".format(config_name))
-    os.makedirs(run_dir)
     print("The new directory is created  - {}".format(run_dir))
 
     with open(os.path.join(run_dir, "run_manifest.json"), "w") as manifest_file:
@@ -486,6 +499,7 @@ def main():
                 "flow_file": os.path.abspath(out_path),
                 "flow_file_sha256": flow_hasher.hexdigest(),
                 "parameters": vars(args),
+                "simulator_binary": simulator_identity,
             },
             manifest_file,
             indent=2,
@@ -580,25 +594,20 @@ def main():
     else:
         print("unknown cc:{}".format(args.cc))
 
+    for option in ('rl_flowlet_gap_us', 'rl_dre_tau_us'):
+        value = getattr(args, option)
+        if value is not None:
+            if args.lb != 'rl' or not 0 < value < float('inf'):
+                raise ValueError('Positive finite RL timing overrides require --lb=rl')
+            config += '\n{} {}\n'.format(option.upper(), value)
+
     with open(config_name, "w") as file:
         file.write(config)
 
     # run program
     print("Running simulation...")
     output_log = config_name.replace(".txt", ".log")
-    run_command = "python2 ./waf --run 'scratch/network-load-balance {config_name}' > {output_log} 2>&1".format(
-        config_name=config_name, output_log=output_log)
-    with open("./mix/.history", "a") as history:
-        history.write(run_command + "\n")
-        history.write(
-            "python2 ./waf --run 'scratch/network-load-balance' --command-template='gdb --args %s {config_name}'\n".format(
-                config_name=config_name)
-        )
-        history.write("\n")
-
-    print(run_command)
-    os.system("python2 ./waf --run 'scratch/network-load-balance {config_name}' > {output_log} 2>&1".format(
-        config_name=config_name, output_log=output_log))
+    execute_simulator(config_name, output_log, binary=args.ns3_binary)
 
     ####################################################
     #                 Analyze the output FCT           #

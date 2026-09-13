@@ -1084,6 +1084,11 @@ void ConWeaveRouting::SetSwitchInfo(bool isToR, uint32_t switch_id) {
     m_switch_id = switch_id;
 }
 
+void ConWeaveRouting::SetAgingTime(Time agingTime) {
+    if (agingTime.GetNanoSeconds() <= 0) NS_FATAL_ERROR("ConWeave aging time must be positive");
+    m_agingTime = agingTime;
+}
+
 /** CALLBACK: callback functions  */
 void ConWeaveRouting::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev,
                                    uint32_t qIndex) {

@@ -60,6 +60,13 @@ class Agent():
         cl.exploration_final_eps = params_dict["exploration_final_eps"]
         cl.eval_epsilon = params_dict.get("eval_epsilon", 0.0)
         cl.eval_prior_only = bool(params_dict.get("eval_prior_only", 0))
+        cl.eval_switch_margin = float(params_dict.get('eval_switch_margin', 0.0))
+        cl.eval_balance_band = float(params_dict.get('eval_balance_band', 0.0))
+        cl.eval_score_mode = params_dict.get('eval_score_mode', 'native')
+        cl.eval_delay_settings = dict(buffer_bytes=int(params_dict['buffer'])*1024**2,
+                                     max_link_gbps=params_dict.get('eval_link_gbps'),
+                                     horizon_us=params_dict.get('eval_horizon_us', 20.0),
+                                     slack_us=params_dict.get('eval_slack_us', 20.0))
         cl.signaling_type = params_dict["signaling_type"]
         cl.training_step = params_dict["training_step"]
         cl.sync_step = params_dict["sync_step"]

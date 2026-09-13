@@ -43,6 +43,8 @@ def parse_arguments():
     )
     group1.add_argument('--train', type=int, help='If 1, train the model.Else, test it', default=1)
     group1.add_argument('--max_nb_arrived_pkts', type=int, help='If < 0, stops the episode at the provided number of arrived packets', default=-1)
+    group1.add_argument('--ns3_binary', type=str, default=None,
+                        help='Use a prebuilt ns-3 simulator for reproducible paired trials')
     group1.add_argument('--ns3_sim_path', type=str, help='Path to the ns3 simulator of conweave folder', default="../conweave-ns3-main/") ## 直接复用，不再新增
     group1.add_argument('--signalingSim', type=int, help='Allows the signaling in NS3 Simulation', default=0)
     group1.add_argument('--activateOverlay', type=int, help='Allows the signaling in NS3 Simulation in Overlay', default=1)
@@ -164,6 +166,8 @@ def parse_arguments():
     group_conweave.add_argument('--map_file',type=str,default="index2switchid",help='映射文件')
     group_conweave.add_argument('--cdf', type=str, default='AliStorage2019', help='CDF file')
     group_conweave.add_argument('--enforce_win', type=int, default=0, help='Enforce window')
+    group_conweave.add_argument('--rl_flowlet_gap_us', type=float, default=None, help='RL flowlet gap override in microseconds; default 20')
+    group_conweave.add_argument('--rl_dre_tau_us', type=float, default=None, help='RL load estimator time constant in microseconds; default 1000')
     group_conweave.add_argument('--sw_monitoring_interval', type=int, default=1000000, help='SW monitoring interval (ns)')
     group_conweave.add_argument(
         '--cwh_extra_reply_deadline',
@@ -199,9 +203,46 @@ def parse_arguments():
     #group_conweave.add_argument('--conweave_use_prisma', type=int, default=0,help='If set to 1, enable PRISMA RL step-by-step routing logic in conweave; otherwise, use default conweave config-file-based batch simulation.')
     
 
+    group3.add_argument('--eval_score_mode', choices=['native', 'queue', 'queue_ema', 'predictive', 'guard'], default='native', help='Evaluation-only diagnostic policy; native preserves the saved policy')
+    group3.add_argument('--eval_link_gbps', type=float, default=None, help='Maximum candidate link rate; required for service-delay diagnostics')
+    group3.add_argument('--eval_horizon_us', type=float, default=20.0)
+    group3.add_argument('--eval_slack_us', type=float, default=20.0)
+    group3.add_argument('--eval_switch_margin', type=float, default=0.0,
+                        help='Prior-only flowlet hysteresis margin; zero preserves native argmax')
+    group3.add_argument('--eval_balance_band', type=float, default=0.0,
+                        help='Prior-only bounded flow-hash diversity; zero preserves native argmax')
+
     ## get the params dict 解析参数
     params = vars(parser.parse_args())
 
+    if not 0 <= params['eval_balance_band'] <= .2:
+        parser.error('--eval_balance_band must be finite and in [0, 0.2]')
+    if params['eval_balance_band'] and not (
+            params['eval_prior_only'] and params['train'] == 0 and
+            params['lb'] == 'rl' and params['eval_epsilon'] == 0):
+        parser.error('Flow-hash diversity requires deterministic prior-only evaluation')
+    if params['eval_balance_band'] and params['eval_switch_margin']:
+        parser.error('Evaluate diversity and switch hysteresis separately')
+
+    if not 0 <= params['eval_switch_margin'] <= .2:
+        parser.error('--eval_switch_margin must be finite and in [0, 0.2]')
+    if params['eval_switch_margin'] and not (
+            params['eval_prior_only'] and params['train'] == 0 and
+            params['lb'] == 'rl' and params['eval_epsilon'] == 0):
+        parser.error('Switch hysteresis requires deterministic prior-only evaluation')
+
+    if params['eval_score_mode'] != 'native':
+        if params['train'] != 0 or params['lb'] != 'rl' or params['eval_epsilon'] != 0 or params['eval_prior_only']:
+            parser.error('Diagnostic policies require deterministic frozen RL evaluation without prior-only')
+        if params['eval_link_gbps'] is None or not 0 < params['eval_link_gbps'] < float('inf'):
+            parser.error('Diagnostic policies require a finite positive --eval_link_gbps')
+        if not 0 <= params['eval_horizon_us'] < float('inf') or not 0 <= params['eval_slack_us'] < float('inf'):
+            parser.error('Diagnostic horizons and slack must be finite and nonnegative')
+
+    for option in ('rl_flowlet_gap_us', 'rl_dre_tau_us'):
+        value = params[option]
+        if value is not None and (params['lb'] != 'rl' or not 0 < value < float('inf')):
+            parser.error('Positive finite RL timing overrides require --lb=rl')
     if params["simul_time"] <= 0:
         parser.error("--simul_time must be positive")
     if not (0.0 <= params["exploration_initial_eps"] <= 1.0):
@@ -230,7 +271,10 @@ def parse_arguments():
         parser.error("--train_every must be positive")
     if params["target_update_interval"] <= 0:
         parser.error("--target_update_interval must be positive")
-    if params["lb"] == "rl" and params["train"] == 0 and not params["load_path"]:
+    # The deterministic prior does not read model weights and can therefore be
+    # evaluated on a topology for which no learned checkpoint exists.
+    if (params["lb"] == "rl" and params["train"] == 0
+            and not params["eval_prior_only"] and not params["load_path"]):
         parser.error("Frozen RL evaluation requires --load_path")
     if params["lb"] != "rl" and params["train"] != 0:
         parser.error("Non-RL load balancing modes require --train=0")
@@ -263,7 +307,7 @@ def parse_arguments():
     out_path = params['overlay_adjacency_matrix_path']
     map_path = os.path.join(map_dir,map_file)
 
-    subprocess.call(['python3',
+    subprocess.check_call(['python3',
                      'scripts/convert_conweave_topo.py',
                      '--in', in_path,
                      '--out', out_path,
@@ -292,6 +336,8 @@ def parse_arguments():
     # params["traffic_matrix_path"] = os.path.abspath(f'{params["traffic_matrix_root_path"].rstrip("/")}/traffic_mat_{params["traffic_matrix_index"]}_adjusted_bps.txt')
     # params["node_coordinates_path"] = os.path.abspath(params["node_coordinates_path"])
     params["ns3_sim_path"] = os.path.abspath(params["ns3_sim_path"])
+    if params["ns3_binary"]:
+        params["ns3_binary"] = os.path.abspath(params["ns3_binary"])
 
     ## add the network topology to the params
     G=nx.DiGraph(nx.empty_graph())

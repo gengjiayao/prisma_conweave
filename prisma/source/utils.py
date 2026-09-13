@@ -53,7 +53,7 @@ def save_model(actor, node_index, path, t, num_episodes, root="saved_models/", s
         folder_name = root + path + "final"
     actor.q_network.save(f"{folder_name}/node{node_index}")
 
-def save_all_models(actors, overlay_nodes, path, t, num_episodes, root="saved_models/", snapshot=False):
+def save_all_models(actors, overlay_nodes, path, t, num_episodes, root="saved_models/", snapshot=False, runtime_contract=None):
     """
     Save all DQN models for each node into a folder.
 
@@ -81,7 +81,7 @@ def save_all_models(actors, overlay_nodes, path, t, num_episodes, root="saved_mo
         folder_name = root + path + f"episode_{num_episodes}_step_{t}"
     else:
         folder_name = root + path + "final"
-    manifest = checkpoint_manifest()
+    manifest = dict(runtime_contract) if runtime_contract is not None else checkpoint_manifest()
     manifest["nodes"] = [int(i) for i in overlay_nodes]
     os.makedirs(folder_name, exist_ok=True)
     with open(os.path.join(folder_name, "checkpoint_manifest.json"), "w") as manifest_file:

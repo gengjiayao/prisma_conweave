@@ -317,6 +317,7 @@ class ConWeaveRouting : public Object {
     void SetConstants(Time extraReplyDeadline, Time extraVOQFlushTime, Time txExpiryTime,
                       Time defaultVOQWaitingTime, Time pathPauseTime, bool pathAwareRerouting);
     void SetSwitchInfo(bool isToR, uint32_t switch_id);
+    void SetAgingTime(Time agingTime);
 
     // callback of SwitchSend
     void DoSwitchSend(Ptr<Packet> p, CustomHeader& ch, uint32_t outDev,

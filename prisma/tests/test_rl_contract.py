@@ -196,5 +196,17 @@ class TransitionContractTest(unittest.TestCase):
         )
 
 
+class RuntimeTimingManifestTest(unittest.TestCase):
+    def test_manifest_records_actual_timing_and_rejects_invalid_timing(self):
+        from source.rl_contract import checkpoint_manifest
+        m = checkpoint_manifest(flowlet_gap_us=100, dre_tau_us=250)
+        self.assertAlmostEqual(m['flowlet_routing']['boundary_seconds'], 100e-6)
+        self.assertAlmostEqual(m['observation']['dre_time_constant_seconds'], 250e-6)
+        with self.assertRaises(ValueError):
+            checkpoint_manifest(flowlet_gap_us=0)
+        with self.assertRaises(ValueError):
+            checkpoint_manifest(dre_tau_us=float('nan'))
+
+
 if __name__ == "__main__":
     unittest.main()

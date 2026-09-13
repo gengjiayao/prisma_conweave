@@ -34,6 +34,8 @@
 #include "ns3/applications-module.h"
 #include "ns3/broadcom-node.h"
 #include "ns3/conga-routing.h"
+#include "../src/point-to-point/model/routing-diagnostics.h"
+#include "../src/point-to-point/model/route-learning.h"
 #include "ns3/conweave-voq.h"
 #include "ns3/core-module.h"
 #include "ns3/error-model.h"
@@ -199,6 +201,8 @@ static vector<vector<bool>> ReadNxMatrix(string adj_mat_file_name)
 /*------Load balancing parameters-----*/
 // mode for load balancer, 0: flow ECMP, 2: DRILL, 3: Conga, 6: Letflow, 7:RL, 9: ConWeave
 uint32_t lb_mode = 0;
+double rl_flowlet_gap_us = 20.0;
+double rl_dre_tau_us = 1000.0;
 
 // Conga params (based on paper recommendation)
 Time conga_flowletTimeout = MicroSeconds(100);  // 100us
@@ -212,6 +216,7 @@ Time letflow_flowletTimeout = MicroSeconds(100);  // 100us
 Time letflow_agingTime = MilliSeconds(2);  // just to clear the unused map entries for simul speed
 
 // Conweave params
+Time conweave_agingTime = MilliSeconds(2);
 Time conweave_extraReplyDeadline = MicroSeconds(4);       // additional term to reply deadline
 Time conweave_pathPauseTime = MicroSeconds(8);            // time to send packets to congested path
 Time conweave_txExpiryTime = MicroSeconds(1000);          // waiting time for CLEAR
@@ -290,6 +295,7 @@ uint32_t buffer_size = 0;  // 0 to set buffer size automatically
 // Added from Here
 double load = 10.0;
 int enable_irn = 0;
+uint64_t irn_rto_low_us = 100, irn_rto_high_us = 320;
 int random_seed = 1;  // change this randomly if you want random expt
 
 uint64_t maxRtt, maxBdp;
@@ -637,6 +643,7 @@ void conweave_history_print() {
  * @brief When one RDMA is finished, so does (1) QP, (2) RxQP, (3) write it on file fct.txt.
  */
 void qp_finish(FILE *fout, Ptr<RdmaQueuePair> q) {
+    RouteLearning::Complete(q->m_flow_id, Simulator::Now().GetNanoSeconds());
     uint32_t sid = Settings::ip_to_node_id(q->sip), did = Settings::ip_to_node_id(q->dip);
     uint64_t base_rtt = pairRtt[n.Get(sid)][n.Get(did)];
     uint64_t b = pairBw[n.Get(sid)][n.Get(did)];
@@ -780,6 +787,24 @@ void stop_simulation_middle() {
     Simulator::Schedule(MicroSeconds(100), &stop_simulation_middle);  // check every 100us
 }
 
+void sample_diagnostic_ports(NodeContainer *nodes) {
+    for (uint32_t i = 0; i < nodes->GetN(); ++i) {
+        Ptr<SwitchNode> sw = DynamicCast<SwitchNode>(nodes->Get(i));
+        if (sw) sw->DiagnosticSamplePorts();
+    }
+    Simulator::Schedule(NanoSeconds(RoutingDiagnostics::sampleNs),
+                        &sample_diagnostic_ports, nodes);
+}
+
+void emit_diagnostic_feedback(NodeContainer *nodes) {
+    for (uint32_t i = 0; i < nodes->GetN(); ++i) {
+        Ptr<SwitchNode> sw = DynamicCast<SwitchNode>(nodes->Get(i));
+        if (sw) sw->DiagnosticEmitFeedback();
+    }
+    Simulator::Schedule(NanoSeconds(RoutingDiagnostics::feedbackPeriodNs),
+                        &emit_diagnostic_feedback, nodes);
+}
+
 /**
  * @brief Calculate edge-to-edge delays, TX delays, and bandwidths
  */
@@ -900,7 +925,7 @@ void TakeDownLink(NodeContainer n, Ptr<Node> a, Ptr<Node> b) {
 }
 
 uint64_t get_nic_rate(NodeContainer &n) {
-    uint64_t avg_nic_rate;
+    uint64_t avg_nic_rate = 0;
     uint64_t n_servers = 0;
     for (uint32_t i = 0; i < n.GetN(); i++) {
         if (n.Get(i)->GetNodeType() == 0) {
@@ -909,7 +934,7 @@ uint64_t get_nic_rate(NodeContainer &n) {
             n_servers += 1;
         }
     }
-    return avg_nic_rate / n_servers;
+    return n_servers ? avg_nic_rate / n_servers : 0;
 }
 
 /************************************************************************/
@@ -958,6 +983,98 @@ int main(int argc, char *argv[]) {
                 conf >> v;
                 lb_mode = v;
                 std::cerr << "LB_MODE\t\t\t" << lb_mode << "\n";
+            } else if (key == "RL_SWITCH_MODE") {
+                conf >> RouteLearning::mode;
+            } else if (key == "RL_PATH_RESELECT") {
+                conf >> RouteLearning::pathReselect;
+            } else if (key == "RL_GATE_MODE") {
+                conf >> RouteLearning::gateMode;
+            } else if (key == "RL_GATE_MODEL") {
+                conf >> RouteLearning::gateModel;
+            } else if (key == "RL_GATE_THRESHOLD_MS") {
+                conf >> RouteLearning::gateThresholdMs;
+            } else if (key == "RL_GATE_TAIL_THRESHOLD_MS") {
+                conf >> RouteLearning::gateTailThresholdMs;
+            } else if (key == "RL_PRESSURE_ENABLE") {
+                conf >> RouteLearning::pressureEnabled;
+            } else if (key == "RL_PRESSURE_MASK") {
+                conf >> RouteLearning::pressureMask;
+            } else if (key == "RL_MIGRATION_ADMISSION_PPM") {
+                conf >> RouteLearning::migrationAdmissionPpm;
+            } else if (key == "RL_MIGRATION_ADMISSION_SEED") {
+                conf >> RouteLearning::migrationAdmissionSeed;
+            } else if (key == "CONGA_FLOWLET_NS") {
+                uint64_t ns; conf >> ns; conga_flowletTimeout = NanoSeconds(ns);
+            } else if (key == "CONGA_DRE_NS") {
+                uint64_t ns; conf >> ns; conga_dreTime = NanoSeconds(ns);
+            } else if (key == "CONGA_AGING_NS") {
+                uint64_t ns; conf >> ns; conga_agingTime = NanoSeconds(ns);
+            } else if (key == "RL_SWITCH_INTERVAL_NS") {
+                conf >> RouteLearning::intervalNs;
+            } else if (key == "RL_SWITCH_MARGIN_NS") {
+                conf >> RouteLearning::marginNs;
+            } else if (key == "RL_SWITCH_MODEL") {
+                conf >> RouteLearning::model;
+            } else if (key == "RL_SWITCH_OUTPUT") {
+                conf >> RouteLearning::output;
+            } else if (key == "RL_SWITCH_SEED") {
+                conf >> RouteLearning::seed;
+            } else if (key == "RL_SWITCH_EPSILON") {
+                conf >> RouteLearning::epsilon;
+            } else if (key == "RL_SWITCH_MASK_HISTORY") {
+                conf >> RouteLearning::maskHistory;
+            } else if (key == "RL_SWITCH_MASK_TRANSPORT") {
+                conf >> RouteLearning::maskTransport;
+            } else if (key == "RL_SWITCH_OVERRIDE_FLOW") {
+                conf >> RouteLearning::overrideFlow;
+            } else if (key == "RL_SWITCH_OVERRIDE_STEP") {
+                conf >> RouteLearning::overrideStep;
+            } else if (key == "RL_SWITCH_OVERRIDE_ACTION") {
+                conf >> RouteLearning::overrideAction;
+            } else if (key == "DIAG_ENABLE") {
+                conf >> RoutingDiagnostics::enabled;
+            } else if (key == "DIAG_REMOTE") {
+                conf >> RoutingDiagnostics::remote;
+            } else if (key == "DIAG_OOO_CNP") {
+                conf >> RoutingDiagnostics::oooCnp;
+            } else if (key == "DIAG_DELAY_NS") {
+                conf >> RoutingDiagnostics::delayNs;
+            } else if (key == "DIAG_GAP_NS") {
+                conf >> RoutingDiagnostics::gapNs;
+            } else if (key == "DIAG_SAMPLE_NS") {
+                conf >> RoutingDiagnostics::sampleNs;
+            } else if (key == "DIAG_BACKGROUND_MODE") {
+                conf >> RoutingDiagnostics::backgroundMode;
+            } else if (key == "DIAG_OUTPUT") {
+                conf >> RoutingDiagnostics::output;
+            } else if (key == "DIAG_FEEDBACK") {
+                conf >> RoutingDiagnostics::feedback;
+            } else if (key == "DIAG_GUARD") {
+                conf >> RoutingDiagnostics::guard;
+            } else if (key == "DIAG_FEEDBACK_PERIOD_NS") {
+                conf >> RoutingDiagnostics::feedbackPeriodNs;
+            } else if (key == "DIAG_GUARD_MARGIN_NS") {
+                conf >> RoutingDiagnostics::guardMarginNs;
+            } else if (key == "DIAG_REPORT_QUANTUM_BYTES") {
+                conf >> RoutingDiagnostics::reportQuantumBytes;
+            } else if (key == "DIAG_AGE_GUARD") {
+                conf >> RoutingDiagnostics::ageGuard;
+            } else if (key == "DIAG_PADDED_REPORTS") {
+                conf >> RoutingDiagnostics::paddedReports;
+            } else if (key == "DIAG_BACKGROUND_PATHS_FILE") {
+                conf >> RoutingDiagnostics::backgroundPathsFile;
+            } else if (key == "CONWEAVE_AGING_US") {
+                uint64_t value; conf >> value; conweave_agingTime = MicroSeconds(value);
+            } else if (key == "CONGA_ACK_FEEDBACK") {
+                conf >> RoutingDiagnostics::congaAckFeedback;
+            } else if (key == "IRN_RTO_LOW_US") {
+                conf >> irn_rto_low_us;
+            } else if (key == "IRN_RTO_HIGH_US") {
+                conf >> irn_rto_high_us;
+            } else if (key.compare("RL_FLOWLET_GAP_US") == 0) {
+                conf >> rl_flowlet_gap_us;
+            } else if (key.compare("RL_DRE_TAU_US") == 0) {
+                conf >> rl_dre_tau_us;
             } else if (key.compare("SW_MONITORING_INTERVAL") == 0) {
                 uint32_t v;
                 conf >> v;
@@ -1105,6 +1222,9 @@ int main(int argc, char *argv[]) {
                 conf >> v;
                 flowgen_stop_time = v;
                 std::cerr << "FLOWGEN_STOP_TIME\t\t" << flowgen_stop_time << "\n";
+            } else if (key == "SIMULATOR_EXTRA_TIME") {
+                conf >> simulator_extra_time;
+                if (!(simulator_extra_time > 0)) NS_FATAL_ERROR("Simulation drain time must be positive");
             } else if (key.compare("ALPHA_RESUME_INTERVAL") == 0) {
                 double v;
                 conf >> v;
@@ -1332,8 +1452,9 @@ int main(int argc, char *argv[]) {
     Config::SetDefault("ns3::QbbNetDevice::PauseTime", UintegerValue(pause_time));
     Config::SetDefault("ns3::QbbNetDevice::QcnEnabled", BooleanValue(enable_qcn));
     Config::SetDefault("ns3::QbbNetDevice::DynamicThreshold", BooleanValue(dynamicth));
-    //Config::SetDefault("ns3::QbbNetDevice::QbbEnabled", BooleanValue(enable_pfc));
-    Config::SetDefault("ns3::QbbNetDevice::QbbEnabled", BooleanValue(true));
+    // Apply the configured PFC mode to hosts as well as switches. IRN uses the
+    // host device flag to decide whether timeout-based loss recovery is needed.
+    Config::SetDefault("ns3::QbbNetDevice::QbbEnabled", BooleanValue(enable_pfc));
 
 
     if (cc_mode != 1 && lb_mode == 9) {
@@ -1630,6 +1751,7 @@ int main(int argc, char *argv[]) {
     topo2bdpMap[std::string("leaf_spine_128_100G_OS2")] = 5000;  // 100Gbps RTT=8320ns
     topo2bdpMap[std::string("fat_k8_100G_OS2")] = 156000;      // RTT=12480 --> all 100G links
     topo2bdpMap[std::string("leaf_spine_128_100G_asym_OS2")] = 5000;  // [Asym Adversarial] same BDP as symmetric (1Gbps dominates)
+    topo2bdpMap[std::string("leaf_spine_1024_1G_asym_OS2")] = 5000;  // Same rates and path length; 64 leaves instead of eight.
 
     // topology_file
     bool found_topo2bdpMap = false;
@@ -1648,6 +1770,8 @@ int main(int argc, char *argv[]) {
         assert(false);
     }
 
+    if (!irn_rto_low_us || irn_rto_high_us < irn_rto_low_us)
+        NS_FATAL_ERROR("IRN timeouts must be positive and high must be at least low");
     // rdmaHw config
     for (uint32_t i = 0; i < node_num; i++) {
         if (n.Get(i)->GetNodeType() == 0) {  // is server
@@ -1677,8 +1801,8 @@ int main(int argc, char *argv[]) {
             rdmaHw->SetAttribute("DctcpRateAI", DataRateValue(DataRate(dctcp_rate_ai)));
             rdmaHw->SetAttribute("IrnEnable", BooleanValue(enable_irn));
             // topo2bdpMap (e.g., longest BDP 25000: 8us * 25Gbps)
-            rdmaHw->SetAttribute("IrnRtoHigh", TimeValue(MicroSeconds(320)));  // 1930
-            rdmaHw->SetAttribute("IrnRtoLow", TimeValue(MicroSeconds(100)));   // 454
+            rdmaHw->SetAttribute("IrnRtoHigh", TimeValue(MicroSeconds(irn_rto_high_us)));
+            rdmaHw->SetAttribute("IrnRtoLow", TimeValue(MicroSeconds(irn_rto_low_us)));
             rdmaHw->SetAttribute("IrnBdp", UintegerValue(irn_bdp_lookup));
             // Monitoring CNP Marking frequency of DCQCN
             if (cc_mode == 1) {
@@ -1980,6 +2104,7 @@ int main(int argc, char *argv[]) {
                         conweave_extraReplyDeadline, conweave_extraVOQFlushTime,
                         conweave_txExpiryTime, conweave_defaultVOQWaitingTime,
                         conweave_pathPauseTime, conweave_pathAwareRerouting);
+                    sw->m_mmu->m_conweaveRouting.SetAgingTime(conweave_agingTime);
                     sw->m_mmu->m_conweaveRouting.SetSwitchInfo(sw->m_isToR, sw->GetId());
                 }
             }
@@ -2132,6 +2257,7 @@ int main(int argc, char *argv[]) {
                 conweaveEnv->SetNodeIdToOverlay(nodeIdToOverlay);
                 conweaveEnv->SetOpenGymInterface(openGymInterface);
                 conweaveEnv->Initialize();
+                conweaveEnv->GetObsManager()->ConfigureTiming(rl_flowlet_gap_us, rl_dre_tau_us);
 
                 sw->AttachRlMgr(conweaveEnv->GetObsManager());   // 关键：让 sw 能 OnPerHopPacket / RlRelease
                 sw->TraceConnectWithoutContext("MacRx",
@@ -2165,8 +2291,52 @@ int main(int argc, char *argv[]) {
             std::cerr << "Failed to open QLEN_MON_FILE: " << qlen_mon_file << "\n";
         }
     }
-    Simulator::Stop(Seconds(flowgen_stop_time + 0.1));
+    if (RouteLearning::mode && (lb_mode!=12 || !RoutingDiagnostics::feedback || !RoutingDiagnostics::remote || RoutingDiagnostics::gapNs))
+        NS_FATAL_ERROR("Route learning requires LB 12 with remote reports and zero flowlet gap");
+    RouteLearning::Initialize();
+    Simulator::Stop(Seconds(flowgen_stop_time + simulator_extra_time));
+    if (RoutingDiagnostics::enabled) {
+        NS_ASSERT_MSG(RoutingDiagnostics::sampleNs > 0 && RoutingDiagnostics::delayNs <= 10000000,
+                      "Invalid diagnostic timing");
+        NS_ASSERT_MSG(RoutingDiagnostics::backgroundMode <= 3 && !RoutingDiagnostics::output.empty(),
+                      "Invalid diagnostic configuration");
+        RoutingDiagnostics::startSeconds = flowgen_start_time;
+        RoutingDiagnostics::LoadBackgroundPaths();
+        NS_ASSERT_MSG(!RoutingDiagnostics::guard || (lb_mode == 12 && RoutingDiagnostics::gapNs == 0),
+                      "Arrival guard requires per-packet diagnostic routing");
+        NS_ASSERT_MSG(RoutingDiagnostics::feedbackPeriodNs > 0, "Feedback period must be positive");
+        if (RoutingDiagnostics::feedback)
+            Simulator::Schedule(Seconds(flowgen_start_time), &emit_diagnostic_feedback, &n);
+        if (lb_mode == 12 && RoutingDiagnostics::remote && !RoutingDiagnostics::feedback && RoutingDiagnostics::delayNs)
+            Simulator::Schedule(Seconds(flowgen_start_time) - NanoSeconds(RoutingDiagnostics::delayNs + RoutingDiagnostics::sampleNs),
+                                &sample_diagnostic_ports, &n);
+    }
     Simulator::Run();
+    RoutingDiagnostics::Write();
+    RouteLearning::Finish(Simulator::Now().GetNanoSeconds());
+    if (RoutingDiagnostics::enabled) {
+        std::ofstream audit((RoutingDiagnostics::output + ".unfinished.jsonl").c_str());
+        if (!audit.good()) NS_FATAL_ERROR("Cannot write unfinished-flow audit");
+        audit << "{\"stop_ns\":" << Simulator::Now().GetNanoSeconds()
+              << ",\"offered\":" << flow_num << ",\"completed\":" << Settings::cnt_finished_flows
+              << ",\"configured_pfc\":" << enable_pfc << ",\"irn_rto_low_us\":" << irn_rto_low_us
+              << ",\"irn_rto_high_us\":" << irn_rto_high_us
+              << ",\"ingress_drops\":" << Settings::dropped_pkt_sw_ingress
+              << ",\"egress_drops\":" << Settings::dropped_pkt_sw_egress << "}\n";
+        for (uint32_t i = 0; i < n.GetN(); ++i) {
+            if (n.Get(i)->GetNodeType() != 0) continue;
+            Ptr<RdmaHw> hw = n.Get(i)->GetObject<RdmaDriver>()->m_rdma;
+            for (const auto &entry : hw->m_qpMap) {
+                Ptr<RdmaQueuePair> q = entry.second;
+                audit << "{\"flow_id\":" << q->m_flow_id << ",\"src\":" << i
+                      << ",\"dst\":" << Settings::ip_to_node_id(q->dip)
+                      << ",\"size\":" << q->m_size << ",\"snd_nxt\":" << q->snd_nxt
+                      << ",\"snd_una\":" << q->snd_una << ",\"rate\":" << q->m_rate.GetBitRate()
+                      << ",\"timer_running\":" << q->m_retransmit.IsRunning()
+                      << ",\"irn_recovery\":" << q->irn.m_recovery << "}\n";
+            }
+        }
+    }
     if (fct_output) { fclose(fct_output); fct_output = NULL; }
     if (qlen_output) { fclose(qlen_output); qlen_output = NULL; }
 

@@ -20,56 +20,36 @@ def configure(conf):
     protoc_min_version = (3,0,0)
     protoc = conf.find_program('protoc', var='PROTOC')
 
+    # Waf versions return either a path string or a one-element sequence.
+    protoc_bin = protoc[0] if isinstance(protoc, (list, tuple)) else protoc
     try:
-        #cmd= [protoc[0], '--version']
-        #output = subprocess.check_output(cmd).decode("utf-8")
-        #output = output.split(" ")[1].rstrip()
-        #protoc_version = tuple(output.split('.'))
-        #protoc_version = tuple(map(int, protoc_version))
-        #conf.msg('Checking for protoc version', output)
-        #conf.env['ENABLE_PROTOC'] = True
-        #6.25修改
-        print('*** using patched opengym wscript ***')
-
-        cmd = [protoc[0], '--version']
-        raw = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+        raw = subprocess.check_output([protoc_bin, '--version'], stderr=subprocess.STDOUT)
         import re
-        m = re.search(r'(\d+)\.(\d+)\.(\d+)', raw.decode() if isinstance(raw,bytes) else raw)
-        protoc_version = tuple(map(int, m.groups())) if m else (3,99,99)
-        conf.msg('Checking for protoc version', '.'.join(map(str, protoc_version)))
-
-    except Exception as e:
-        conf.msg('WARNING', 'protoc unusable (%s) – skip version check' % e, 'YELLOW')
-        protoc_version = (3,99,99)   # 假装最新
-    # 一律视为找到
+        match = re.search(r'(\d+)\.(\d+)\.(\d+)', raw.decode('utf-8'))
+        if match is None:
+            raise ValueError('unrecognized protoc version: %r' % raw)
+        protoc_version = tuple(map(int, match.groups()))
+    except Exception as exc:
+        conf.fatal('protoc version check failed: %s' % exc)
+    conf.msg('Checking for protoc version', '.'.join(map(str, protoc_version)))
+    if protoc_version < protoc_min_version:
+        conf.fatal('protoc version must be at least 3.0.0')
     conf.env['ENABLE_PROTOC'] = True
-
-    if not conf.env['ENABLE_ZMQ'] or not conf.env['ENABLE_PROTOBUF'] or not conf.env['ENABLE_PROTOC']:
+    if not conf.env['ENABLE_ZMQ'] or not conf.env['ENABLE_PROTOBUF']:
         conf.env['MODULES_NOT_BUILT'].append('opengym')
         return
+    conf.env.append_value('LINKFLAGS', ['-lzmq', '-lprotobuf'])
+    conf.env.append_value('LIB', ['zmq', 'protobuf'])
+    pbSrcDir = './src/opengym/model/'
+    try:
+        for out_flag, target in [('--cpp_out', pbSrcDir),
+                                 ('--python_out', pbSrcDir + 'ns3gym/ns3gym/')]:
+            subprocess.check_call([protoc_bin, '-I=' + pbSrcDir,
+                                   out_flag + '=' + target, pbSrcDir + 'messages.proto'])
+    except (OSError, subprocess.CalledProcessError) as exc:
+        conf.fatal('Protobuf message generation failed: %s' % exc)
+    conf.msg('Build ns3gym Protobuf messages', 'Done')
 
-    # if protoc was found, check if version >= 3.0.0
-    if protoc_version < protoc_min_version:
-        conf.fatal('protoc version %s older than minimum supported version %s' %
-                ('.'.join(map(str, protoc_version)), '.'.join(map(str, protoc_min_version)) ))
-
-    conf.env.append_value("LINKFLAGS", ["-lzmq", "-lprotobuf"])
-    conf.env.append_value("LIB", ["zmq", "protobuf"])
-
-    # --------- 如果 protoc 无法执行，就跳过重新生成6.25 ---------
-    pbSrcDir = "./src/opengym/model/"
-    if conf.env['ENABLE_PROTOC']:
-        try:
-            protoc_bin = protoc[0]
-            for out_flag in ('--cpp_out', '--python_out'):
-                target = pbSrcDir if out_flag == '--cpp_out' else pbSrcDir + "ns3gym/ns3gym/"
-                cmd = [protoc_bin, "-I="+pbSrcDir, out_flag+"="+target, pbSrcDir+"messages.proto"]
-                if subprocess.call(" ".join(cmd), shell=True) != 0:
-                    raise RuntimeError("protoc failed")
-            conf.msg("Build ns3gym Protobuf messages", "Done")
-        except Exception as e:
-            conf.msg("WARNING", "protoc exec failed (%s) – use existing .pb files" % e, 'YELLOW')
-    # ---------------------------------------------------------
 
 def build(bld):
     # Don't do anything for this module if click should not be built.

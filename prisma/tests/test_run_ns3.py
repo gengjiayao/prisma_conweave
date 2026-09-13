@@ -37,6 +37,7 @@ class RunNs3ProcessContractTest(unittest.TestCase):
                 "overlay_adjacency_matrix_path": "/tmp/overlay.txt",
                 "index_to_switch_id_map_path": "/tmp/index.txt",
             }
+            params.update(ns3_binary='/tmp/a directory/simulator', rl_flowlet_gap_us=100, rl_dre_tau_us=250)
             fake_process = mock.Mock(pid=1234)
             with mock.patch("subprocess.Popen", return_value=fake_process) as popen:
                 result = run_ns3(params)
@@ -45,6 +46,9 @@ class RunNs3ProcessContractTest(unittest.TestCase):
             self.assertIn("--traffic_seed", command)
             self.assertEqual(command[command.index("--traffic_seed") + 1], "200")
             self.assertNotIn("--cwh_extra_reply_deadline", command)
+            self.assertEqual(command[command.index('--ns3_binary')+1], '/tmp/a directory/simulator')
+            self.assertEqual(command[command.index('--rl_flowlet_gap_us')+1], '100.0')
+            self.assertEqual(command[command.index('--rl_dre_tau_us')+1], '250.0')
 
     def test_omits_traffic_seed_for_legacy_runs(self):
         with tempfile.TemporaryDirectory() as ns3_dir:

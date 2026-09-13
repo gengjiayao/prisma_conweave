@@ -6,9 +6,11 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <deque>
 
 #include "qbb-net-device.h"
 #include "switch-mmu.h"
+#include "route-feedback.h"
 
 #include "ns3/traced-callback.h"
 #include "ns3/callback.h"
@@ -84,6 +86,51 @@ class SwitchNode : public Node {
     // RL override (lb_mode = 7)
     uint32_t DoLbRl(Ptr<Packet> p, CustomHeader &ch, const std::vector<int> &nexthops);
 
+    struct DiagnosticFlow {
+        uint32_t port = 0;
+        int64_t lastNs = -1;
+        double arrivalNs = 0;
+        uint64_t informationAgeNs = 0;
+        int64_t firstNs = -1, decisionNs = -1, switchNs = -1;
+        unsigned lastAction = 0;
+        std::map<uint32_t, double> previousScores;
+        uint32_t maxSequence = 0, previousAck = 0;
+        uint64_t sentEnd = 0; // Highest exclusive payload sequence observed and submitted for forwarding.
+        unsigned pathChanges = 0;
+    };
+    struct RouteAckState {
+        uint32_t sequence = 0;
+        int64_t lastNs = -1, nackNs = -1;
+        double rate = 0;
+    };
+    std::unordered_map<uint64_t, RouteAckState> m_routeAcks;
+    std::unordered_map<uint64_t, DiagnosticFlow> m_diagnosticFlows;
+    std::unordered_map<uint64_t, uint32_t> m_diagnosticObservedPorts;
+    std::map<uint32_t, std::deque<std::pair<int64_t, uint32_t>>> m_diagnosticHistory;
+    RouteFeedbackCache m_routeFeedback;
+    uint64_t m_routeFeedbackSequence = 0;
+    const RouteFeedback::Entry *FindRouteFeedback(uint32_t port, uint32_t destination,
+                                                 double *delta = nullptr, uint64_t *age = nullptr) const;
+    double ReportedPathDelay(uint32_t outIf, CustomHeader &ch, bool remote);
+    // Initial-path actor state, derived only from received reports and packets
+    // routed by this leaf. No remote live queue or application size is read.
+    struct RoutePathTraffic {
+        int64_t lastNs = -1, assignedNs = -1;
+        double workNs = 0;
+    };
+    std::map<std::pair<uint32_t, uint32_t>, RoutePathTraffic> m_routePathTraffic;
+    struct PrefixQueue {
+        uint64_t bytes = 0;
+        std::unordered_map<uint64_t, uint32_t> packetsByFlow;
+    };
+    std::map<uint32_t, PrefixQueue> m_prefixQueues;
+    uint64_t m_diagnosticDecisionAgeNs = 0;
+    uint32_t DiagnosticRoute(Ptr<Packet> p, CustomHeader &ch,
+                             const std::vector<int> &nexthops);
+    double DiagnosticPathDelay(uint32_t outIf, CustomHeader &ch,
+                               bool remote, bool historical);
+    void DiagnosticObserve(Ptr<Packet> p, CustomHeader &ch, uint32_t outIf);
+
     // 7 == RL 覆写模式；0 表示“跟随全局 Settings::lb_mode”（默认）
     uint32_t m_lbMode = 0;
 
@@ -107,6 +154,9 @@ class SwitchNode : public Node {
 
 
    public:
+    void ObservePrefixQueue(uint32_t port, Ptr<Packet> packet, const CustomHeader &ch, bool enqueue);
+    void DiagnosticSamplePorts();
+    void DiagnosticEmitFeedback();
    void SendToDevContinue(Ptr<Packet> p, CustomHeader &ch);
    /* 由 ConweaveObsManager 在动作到达时调用，放行被挂起的包 */
     void RlRelease(Ptr<Packet> p, CustomHeader& ch, uint32_t outIf);

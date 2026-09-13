@@ -20,6 +20,8 @@
 
 #define __STDC_LIMIT_MACROS 1
 #include "ns3/qbb-net-device.h"
+#include "switch-node.h"
+#include "route-learning.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -396,10 +398,16 @@ void QbbNetDevice::Receive(Ptr<Packet> packet) {
             packet->AddPacketTag(FlowIdTag(m_ifIndex));
             m_node->SwitchReceiveFromDevice(this, packet, ch);
         } else {  // NIC
-            // send to RdmaHw
-            int ret = m_rdmaReceiveCb(packet, ch);
-            // TODO we may based on the ret do something
-            if (ret == 0) DoMpiReceive(packet);
+            // RDMA consumes its data and control packets. Its return value is
+            // a processing status, not permission to deliver a second copy to
+            // the IP stack (which would generate spurious port-unreachable ICMP).
+            if (!m_rdmaReceiveCb.IsNull() &&
+                (ch.l3Prot == 0x11 || ch.l3Prot == 0xFC ||
+                 ch.l3Prot == 0xFD || ch.l3Prot == 0xFF)) {
+                m_rdmaReceiveCb(packet, ch);
+            } else {
+                DoMpiReceive(packet);
+            }
         }
     }
     return;
@@ -429,7 +437,11 @@ bool QbbNetDevice::Send(Ptr<Packet> packet, const Address &dest, uint16_t protoc
 bool QbbNetDevice::SwitchSend(uint32_t qIndex, Ptr<Packet> packet, CustomHeader &ch) {
     m_macTxTrace(packet);
     m_traceEnqueue(packet, qIndex);
-    m_queue->Enqueue(packet, qIndex);
+    const bool accepted = m_queue->Enqueue(packet, qIndex);
+    if (accepted && RouteLearning::pressureEnabled) {
+        Ptr<SwitchNode> sw = DynamicCast<SwitchNode>(m_node);
+        if (sw) sw->ObservePrefixQueue(m_ifIndex, packet, ch, true);
+    }
     DequeueAndTransmit();
     return true;
 }

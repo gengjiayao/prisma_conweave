@@ -1,10 +1,20 @@
 #include "switch-node.h"
+#include "weighted-ecmp.h"
+#include "routing-diagnostics.h"
+#include "route-learning.h"
+#include <random>
+#include <unordered_set>
+#include "qbb-header.h"
+#include <fstream>
+#include <iomanip>
+#include <limits>
 
 #include "assert.h"
 #include "ns3/boolean.h"
 #include "ns3/conweave-routing.h"
 #include "ns3/double.h"
 #include "ns3/flow-id-tag.h"
+#include "ns3/flow-id-num-tag.h"
 #include "ns3/int-header.h"
 #include "ns3/ipv4-header.h"
 #include "ns3/ipv4.h"
@@ -23,6 +33,19 @@
 NS_LOG_COMPONENT_DEFINE("SwitchNode");
 
 namespace {
+  struct DiagnosticCounters {
+    uint64_t packets = 0, bytes = 0, routeChanges = 0, decisions = 0;
+    uint64_t suboptimal = 0, staleReads = 0, missingHistory = 0;
+    uint64_t rxPackets = 0, rxBytes = 0, outOfOrder = 0, duplicates = 0;
+    uint64_t ecnPackets = 0, reorderCnp = 0, reorderWithoutEcn = 0;
+    uint64_t proposedChanges = 0, guardedChanges = 0, missingReports = 0;
+    double queueRegretNs = 0, chosenDelayNs = 0, informationAgeNs = 0;
+    double localQueueNs = 0, remoteQueueNs = 0;
+  };
+  DiagnosticCounters S_diagnostic[2];
+  uint64_t S_reportPackets = 0, S_reportBytes = 0, S_reportsDelivered = 0;
+  uint64_t S_reportsRejected = 0, S_reportsMalformed = 0;
+  std::map<uint32_t, uint32_t> S_backgroundPaths;
   // RL拦截在交换机侧的统计（进程级聚合）
   std::atomic<uint64_t> S_rlSeen{0};         // 满足候选条件、尝试拦截的包（非控制、非目的ToR）
   std::atomic<uint64_t> S_rlHeld{0};         // 实际被挂起并请求动作
@@ -221,6 +244,15 @@ uint32_t SwitchNode::DoLbFlowECMP(Ptr<const Packet> p, const CustomHeader &ch,
     }
 
     uint32_t hashVal = EcmpHash(buf.u8, 12, m_ecmpSeed);
+    if (Settings::lb_mode == 1 && (ch.l3Prot == 0x6 || ch.l3Prot == 0x11)) {
+        std::vector<uint64_t> rates;
+        for (int outIf : nexthops) {
+            Ptr<QbbNetDevice> dev = DynamicCast<QbbNetDevice>(m_devices[outIf]);
+            NS_ASSERT_MSG(dev, "Weighted ECMP requires QbbNetDevice next hops");
+            rates.push_back(dev->GetDataRate().GetBitRate());
+        }
+        return nexthops[CapacityWeightedIndex(hashVal, rates)];
+    }
     uint32_t idx = hashVal % nexthops.size();
     return nexthops[idx];
 }
@@ -409,6 +441,47 @@ void SwitchNode::CheckAndSendResume(uint32_t inDev, uint32_t qIndex) {
 bool SwitchNode::SwitchReceiveFromDevice(Ptr<NetDevice> device, Ptr<Packet> packet,
                                          CustomHeader &ch) {
     m_traceMacRx(device,packet);  // 9.9trace callback
+    if (RouteLearning::mode && m_isToR && m_isToR_hostIP.count(ch.dip) &&
+        (ch.l3Prot==0xFC || ch.l3Prot==0xFD)) {
+        uint64_t key=ConWeaveRouting::GetFlowKey(ch.dip,ch.sip,ch.ack.dport,ch.ack.sport);
+        auto &ack=m_routeAcks[key]; int64_t now=Simulator::Now().GetNanoSeconds();
+        if (ack.lastNs>=0 && now>ack.lastNs && ch.ack.seq>ack.sequence) {
+            double rate=(ch.ack.seq-ack.sequence)*8./double(now-ack.lastNs);
+            ack.rate=.8*ack.rate+.2*std::min(1.,rate);
+        }
+        ack.sequence=std::max(ack.sequence,ch.ack.seq);ack.lastNs=now;
+        // IRN uses the NACK protocol number even for ordinary cumulative ACKs.
+        // A nonzero selective range identifies out-of-order reception feedback.
+        if(ch.l3Prot==0xFD && ch.ack.irnNackSize>0) ack.nackNs=now;
+    }
+    if (ch.l3Prot == RouteFeedback::PROTOCOL) {
+        // The only remote-state update path: bytes received on this link.
+        if (!m_isToR || !RoutingDiagnostics::enabled || !RoutingDiagnostics::feedback) return true;
+        Ptr<Packet> payload=packet->Copy();
+        PppHeader ppp; Ipv4Header ip;
+        payload->RemoveHeader(ppp); payload->RemoveHeader(ip);
+        std::vector<uint8_t> wire(payload->GetSize());
+        payload->CopyData(wire.data(),wire.size());
+        RouteFeedback report;
+        if (!RouteFeedback::Decode(wire,report) || report.pressure!=RouteLearning::pressureEnabled) {
+            ++S_reportsMalformed; return true;
+        }
+        ++S_reportsDelivered;
+        if (!m_routeFeedback.Accept(device->GetIfIndex(),report,Simulator::Now().GetNanoSeconds())) {
+            ++S_reportsRejected; return true;
+        }
+        if (RouteLearning::pressureEnabled)
+            for (const auto &e:report.entries)
+                RouteLearning::RecordPressure('R',{uint64_t(Simulator::Now().GetNanoSeconds()),GetId(),
+                    device->GetIfIndex(),e.network,e.prefixBytes,e.prefixFlows,report.sampleNs});
+        return true;
+    }
+
+    if (RoutingDiagnostics::enabled && RoutingDiagnostics::backgroundMode &&
+        ch.l3Prot == 0x11 && RoutingDiagnostics::Group(ch.sip) == 1) {
+        SendToDev(packet, ch);
+        return true;
+    }
 
     // === RL 每跳拦截 ===
     uint32_t lbModeLocal = (m_lbMode == 0) ? Settings::lb_mode : m_lbMode;
@@ -427,6 +500,13 @@ bool SwitchNode::SwitchReceiveFromDevice(Ptr<NetDevice> device, Ptr<Packet> pack
 }
 
 void SwitchNode::SendToDev(Ptr<Packet> p, CustomHeader &ch) {
+    // Exogenous diagnostic background follows the same fixed path under every
+    // treatment. Bypass path-tag algorithms at every hop for these data packets.
+    if (RoutingDiagnostics::enabled && RoutingDiagnostics::backgroundMode &&
+        ch.l3Prot == 0x11 && RoutingDiagnostics::Group(ch.sip) == 1) {
+        SendToDevContinue(p, ch);
+        return;
+    }
     /** HIJACK: hijack the packet and run DoSwitchSend internally for Conga and ConWeave.
      * Note that DoLbConWeave() and DoLbConga() are flow-ECMP function for control packets
      * or intra-ToR traffic.
@@ -527,6 +607,20 @@ int SwitchNode::GetOutDev(Ptr<Packet> p, CustomHeader &ch) {
 
     // entry found
     const auto &nexthops = entry->second;
+    if (RoutingDiagnostics::enabled && RoutingDiagnostics::backgroundMode &&
+        ch.l3Prot == 0x11 && RoutingDiagnostics::Group(ch.sip) == 1) {
+        if (m_isToR && m_isToR_hostIP.count(ch.sip) && nexthops.size() > 1) {
+            uint32_t source = Settings::hostIp2IdMap.at(ch.sip) % 128;
+            uint32_t index = RoutingDiagnostics::backgroundMode == 2 && source >= 64 ? 1 : 0;
+            if (RoutingDiagnostics::backgroundMode == 3) {
+                FlowIDNUMTag tag;
+                if (!p->PeekPacketTag(tag)) NS_FATAL_ERROR("Pinned background packet lacks flow ID");
+                index = S_backgroundPaths.at(tag.GetId());
+            }
+            return nexthops.at(index);
+        }
+        return DoLbFlowECMP(p, ch, nexthops);
+    }
     bool control_pkt =
         (ch.l3Prot == 0xFF || ch.l3Prot == 0xFE || ch.l3Prot == 0xFD || ch.l3Prot == 0xFC);
 
@@ -538,6 +632,10 @@ int SwitchNode::GetOutDev(Ptr<Packet> p, CustomHeader &ch) {
     }
 
     switch (Settings::lb_mode) {
+        case 12:
+            return DiagnosticRoute(p, ch, nexthops);
+        case 1:
+            return DoLbFlowECMP(p, ch, nexthops);
         case 7:
             return DoLbRl(p, ch, nexthops);
         case 2:
@@ -558,6 +656,17 @@ int SwitchNode::GetOutDev(Ptr<Packet> p, CustomHeader &ch) {
  * The (possible) callback point when conweave dequeues packets from buffer
  */
 void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, uint32_t qIndex) {
+    if (RoutingDiagnostics::enabled && RoutingDiagnostics::backgroundMode &&
+        Settings::lb_mode == 3 && ch.l3Prot == 0x11 && RoutingDiagnostics::Group(ch.sip) == 1) {
+        // Pinning changes route selection only. Background bytes must still
+        // enter CONGA's physical-link load estimator, including at the spine.
+        auto &conga = m_mmu->m_congaRouting;
+        if (!conga.m_dreEvent.IsRunning())
+            conga.m_dreEvent = Simulator::Schedule(conga.m_dreTime, &CongaRouting::DreEvent, &conga);
+        conga.UpdateLocalDre(p, ch, outDev);
+        RoutingDiagnostics::congaBackgroundBytes += p->GetSize();
+    }
+    if (RoutingDiagnostics::enabled) DiagnosticObserve(p, ch, outDev);
     // admission control
     FlowIdTag t;
     p->PeekPacketTag(t);
@@ -607,6 +716,10 @@ void SwitchNode::DoSwitchSend(Ptr<Packet> p, CustomHeader &ch, uint32_t outDev, 
 }
 
 void SwitchNode::SwitchNotifyDequeue(uint32_t ifIndex, uint32_t qIndex, Ptr<Packet> p) {
+    if (RouteLearning::pressureEnabled) {
+        CustomHeader header(CustomHeader::L2_Header | CustomHeader::L3_Header | CustomHeader::L4_Header);
+        p->PeekHeader(header);ObservePrefixQueue(ifIndex,p,header,false);
+    }
     FlowIdTag t;
     p->PeekPacketTag(t);
     if (qIndex != 0) {
@@ -701,6 +814,457 @@ void SwitchNode::ClearTable() { m_rtTable.clear(); }
 uint64_t SwitchNode::GetTxBytesOutDev(uint32_t outdev) {
     assert(outdev < pCnt);
     return m_txBytes[outdev];
+}
+
+bool RoutingDiagnostics::enabled = false;
+bool RoutingDiagnostics::remote = false;
+bool RoutingDiagnostics::oooCnp = true;
+bool RoutingDiagnostics::feedback = false;
+bool RoutingDiagnostics::guard = false;
+uint64_t RoutingDiagnostics::feedbackPeriodNs = 50000;
+uint64_t RoutingDiagnostics::guardMarginNs = 0;
+uint32_t RoutingDiagnostics::reportQuantumBytes = 0;
+bool RoutingDiagnostics::ageGuard = false;
+bool RoutingDiagnostics::paddedReports = false;
+bool RoutingDiagnostics::congaAckFeedback = false;
+uint64_t RoutingDiagnostics::congaAckUpdates = 0;
+uint64_t RoutingDiagnostics::congaBackgroundBytes = 0;
+uint64_t RoutingDiagnostics::delayNs = 0;
+uint64_t RoutingDiagnostics::gapNs = 100000;
+uint64_t RoutingDiagnostics::sampleNs = 10000;
+uint64_t RoutingDiagnostics::backgroundPeriodNs = 1000000;
+uint32_t RoutingDiagnostics::backgroundMode = 0;
+double RoutingDiagnostics::startSeconds = 2.0;
+std::string RoutingDiagnostics::output;
+std::string RoutingDiagnostics::backgroundPathsFile;
+
+void RoutingDiagnostics::LoadBackgroundPaths() {
+    if (!enabled || backgroundMode != 3) return;
+    std::ifstream file(backgroundPathsFile.c_str());
+    if (!file.good()) NS_FATAL_ERROR("Missing exogenous background path schedule");
+    uint32_t id, path;
+    while (file >> id >> path) {
+        if (path >= 8 || !S_backgroundPaths.emplace(id, path).second)
+            NS_FATAL_ERROR("Invalid or duplicate background path assignment");
+    }
+    if (!file.eof()) NS_FATAL_ERROR("Malformed background path schedule");
+}
+
+unsigned RoutingDiagnostics::Group(uint32_t sourceIp) {
+    if (!backgroundMode) return 0;
+    uint32_t source = Settings::hostIp2IdMap.at(sourceIp) % 128;
+    return source >= 32 && source < 96 ? 1 : 0;
+}
+
+void RoutingDiagnostics::Receive(uint32_t sourceIp, uint32_t seq, uint32_t expected,
+                                 uint32_t size, bool ecn, bool cnp) {
+    if (!enabled) return;
+    auto &s = S_diagnostic[Group(sourceIp)];
+    ++s.rxPackets; s.rxBytes += size;
+    if (seq > expected) ++s.outOfOrder;
+    if (seq + size <= expected) ++s.duplicates;
+    if (ecn) ++s.ecnPackets;
+    if (cnp) { ++s.reorderCnp; if (!ecn) ++s.reorderWithoutEcn; }
+}
+
+void RoutingDiagnostics::Write() {
+    if (!enabled) return;
+    std::ofstream f(output.c_str());
+    if (!f.good()) NS_FATAL_ERROR("Cannot write routing diagnosis output");
+    f << std::setprecision(17) << "{\n\"groups\":[\n";
+    for (unsigned i = 0; i < 2; ++i) {
+        const auto &s = S_diagnostic[i];
+        f << "{\"packets\":" << s.packets << ",\"bytes\":" << s.bytes
+          << ",\"route_changes\":" << s.routeChanges << ",\"decisions\":" << s.decisions
+          << ",\"suboptimal_packets\":" << s.suboptimal
+          << ",\"queue_regret_ns_sum\":" << s.queueRegretNs
+          << ",\"chosen_delay_ns_sum\":" << s.chosenDelayNs
+          << ",\"local_queue_ns_sum\":" << s.localQueueNs
+          << ",\"remote_queue_ns_sum\":" << s.remoteQueueNs
+          << ",\"historical_reads\":" << s.staleReads
+          << ",\"missing_history\":" << s.missingHistory
+          << ",\"information_age_ns_sum\":" << s.informationAgeNs
+          << ",\"rx_packets\":" << s.rxPackets << ",\"rx_bytes\":" << s.rxBytes
+          << ",\"out_of_order\":" << s.outOfOrder << ",\"duplicates\":" << s.duplicates
+          << ",\"ecn_packets\":" << s.ecnPackets << ",\"reorder_cnp\":" << s.reorderCnp
+          << ",\"reorder_without_ecn\":" << s.reorderWithoutEcn
+          << ",\"proposed_changes\":" << s.proposedChanges << ",\"guarded_changes\":" << s.guardedChanges
+          << ",\"missing_reports\":" << s.missingReports << "}" << (i ? "\n" : ",\n");
+    }
+    f << "],\"remote\":" << remote << ",\"delay_ns\":" << delayNs
+      << ",\"gap_ns\":" << gapNs << ",\"ooo_cnp_enabled\":" << oooCnp
+      << ",\"background_mode\":" << backgroundMode
+      << ",\"feedback\":" << feedback << ",\"guard\":" << guard
+      << ",\"feedback_period_ns\":" << feedbackPeriodNs << ",\"guard_margin_ns\":" << guardMarginNs
+      << ",\"report_quantum_bytes\":" << reportQuantumBytes << ",\"age_guard\":" << ageGuard
+      << ",\"padded_reports\":" << paddedReports
+      << ",\"conga_ack_feedback\":" << congaAckFeedback << ",\"conga_ack_updates\":" << congaAckUpdates
+      << ",\"conga_background_hop_bytes\":" << congaBackgroundBytes
+      << ",\"report_packets\":" << S_reportPackets << ",\"report_bytes\":" << S_reportBytes
+      << ",\"reports_delivered\":" << S_reportsDelivered
+      << ",\"reports_rejected\":" << S_reportsRejected
+      << ",\"reports_malformed\":" << S_reportsMalformed
+      << ",\"reports_sent_minus_received\":" << S_reportPackets-S_reportsDelivered
+      << ",\"oracle_counters_valid\":" << (!RouteLearning::mode && !feedback) << "}\n";
+}
+
+void SwitchNode::DiagnosticEmitFeedback() {
+    if (m_isToR) return;
+    // The spine advertises only its OWN forwarding table and output ports.
+    std::map<uint32_t,uint32_t> localRoutes;
+    for (const auto &route:m_rtTable) {
+        if (route.second.size()!=1) NS_FATAL_ERROR("Feedback requires single spine-to-leaf next hops");
+        localRoutes[route.first]=route.second.front();
+    }
+    RouteFeedback report;
+    report.sequence=++m_routeFeedbackSequence;
+    report.sampleNs=Simulator::Now().GetNanoSeconds();
+    report.pressure=RouteLearning::pressureEnabled;
+    for (const auto &prefix:RouteFeedbackPrefixes(localRoutes)) {
+        RouteFeedback::Entry e; e.network=prefix.network; e.prefix=prefix.prefix;
+        const uint32_t port=prefix.port;
+        uint64_t bytes=CalculateInterfaceLoad(port);
+        if (RoutingDiagnostics::reportQuantumBytes) {
+            const uint64_t q=RoutingDiagnostics::reportQuantumBytes;
+            bytes=((bytes+q-1)/q)*q;
+        }
+        if (bytes>uint64_t(UINT32_MAX)) NS_FATAL_ERROR("Queue report overflow");
+        e.queueBytes=bytes;
+        e.rateBps=DynamicCast<QbbNetDevice>(GetDevice(port))->GetDataRate().GetBitRate();
+        if (report.pressure) {
+            const auto &prefixQueue=m_prefixQueues[port];
+            const uint64_t quantized=((prefixQueue.bytes+1023)/1024)*1024;
+            if (quantized>UINT32_MAX || prefixQueue.packetsByFlow.size()>UINT32_MAX)
+                NS_FATAL_ERROR("Prefix report overflow");
+            e.prefixBytes=quantized; e.prefixFlows=prefixQueue.packetsByFlow.size();
+            RouteLearning::RecordPressure('S',{report.sampleNs,GetId(),port,e.network,
+                prefixQueue.bytes,e.prefixFlows,e.prefixBytes});
+        }
+        report.entries.push_back(e);
+    }
+    const std::vector<uint8_t> wire=report.Encode();
+    for (uint32_t port=1; port<GetNDevices(); ++port) {
+        Ptr<Packet> packet=Create<Packet>(wire.data(),wire.size());
+        Ipv4Header ip; ip.SetSource(Ipv4Address(uint32_t(0))); ip.SetDestination(Ipv4Address(uint32_t(0)));
+        ip.SetProtocol(RouteFeedback::PROTOCOL); ip.SetTtl(1); ip.SetPayloadSize(packet->GetSize()); packet->AddHeader(ip);
+        PppHeader ppp; ppp.SetProtocol(0x0021); packet->AddHeader(ppp);
+        if (wire.size()+ip.GetSerializedSize()>GetDevice(port)->GetMtu())
+            NS_FATAL_ERROR("Feedback exceeds link MTU; use fewer advertised prefixes");
+        CustomHeader ch(CustomHeader::L2_Header | CustomHeader::L3_Header | CustomHeader::L4_Header);
+        packet->PeekHeader(ch);
+        // This local ingress tag serves existing MMU accounting only. The
+        // feedback decoder neither reads it nor needs any simulator UID.
+        FlowIdTag tag; tag.SetFlowId(Settings::CONWEAVE_CTRL_DUMMY_INDEV); packet->AddPacketTag(tag);
+        ++S_reportPackets; S_reportBytes+=packet->GetSize();
+        DoSwitchSend(packet,ch,port,0);
+    }
+}
+
+const RouteFeedback::Entry *SwitchNode::FindRouteFeedback(uint32_t port,uint32_t destination,
+                                                         double *delta,uint64_t *age) const {
+    const uint64_t ttl=std::max(uint64_t(1000000),5*RoutingDiagnostics::feedbackPeriodNs);
+    return m_routeFeedback.Find(port,destination,Simulator::Now().GetNanoSeconds(),ttl,delta,age);
+}
+
+double SwitchNode::ReportedPathDelay(uint32_t outIf,CustomHeader &ch,bool remote) {
+    const double localRate=DynamicCast<QbbNetDevice>(m_devices[outIf])->GetDataRate().GetBitRate();
+    const double local=(CalculateInterfaceLoad(outIf)+1000.)*8e9/localRate;
+    uint64_t age=0;
+    const auto *report=FindRouteFeedback(outIf,ch.dip,nullptr,&age);
+    auto &stats=S_diagnostic[RoutingDiagnostics::Group(ch.sip)];
+    if (!report) ++stats.missingReports;
+    else {
+        ++stats.staleReads; stats.informationAgeNs+=age;
+        m_diagnosticDecisionAgeNs=std::max(m_diagnosticDecisionAgeNs,age);
+    }
+    // Before a report arrives, use only the local link as a nominal estimate.
+    // An absent/expired report never falls back to remote simulator objects.
+    const double rate=report ? report->rateBps : localRate;
+    return local+((remote && report ? report->queueBytes : 0)+1000.)*8e9/rate;
+}
+
+void SwitchNode::DiagnosticSamplePorts() {
+    const int64_t now = Simulator::Now().GetNanoSeconds();
+    const int64_t retention=std::max(uint64_t(RoutingDiagnostics::delayNs+2*RoutingDiagnostics::sampleNs),
+                                    uint64_t(RouteLearning::mode>=8 ? 1000000 : 0));
+    const int64_t oldest = now - retention;
+    for (uint32_t i = 1; i < GetNDevices(); ++i) {
+        auto &h = m_diagnosticHistory[i];
+        h.emplace_back(now, CalculateInterfaceLoad(i));
+        while (h.size() > 2 && h[1].first < oldest) h.pop_front();
+    }
+}
+
+double SwitchNode::DiagnosticPathDelay(uint32_t outIf, CustomHeader &ch,
+                                      bool remote, bool historical) {
+    if (historical && RoutingDiagnostics::feedback) return ReportedPathDelay(outIf,ch,remote);
+    if (RouteLearning::mode) NS_FATAL_ERROR("Oracle remote access is forbidden during RL routing");
+    Ptr<QbbNetDevice> local = DynamicCast<QbbNetDevice>(m_devices[outIf]);
+    double delay = (CalculateInterfaceLoad(outIf) + 1000.0) * 8e9 / local->GetDataRate().GetBitRate();
+    Ptr<Channel> channel = local->GetChannel();
+    Ptr<SwitchNode> next;
+    for (uint32_t i = 0; i < channel->GetNDevices(); ++i)
+        if (channel->GetDevice(i)->GetNode()->GetId() != GetId())
+            next = DynamicCast<SwitchNode>(channel->GetDevice(i)->GetNode());
+    if (!next) NS_FATAL_ERROR("Diagnostic oracle requires a two-tier leaf-spine topology");
+    const auto &nextHops = next->m_rtTable.at(ch.dip);
+    if (nextHops.size() != 1) NS_FATAL_ERROR("Diagnostic oracle expects one spine-to-destination-leaf hop");
+    uint32_t nextIf = nextHops[0];
+    uint32_t bytes = 0;
+    if (remote) bytes=next->CalculateInterfaceLoad(nextIf);
+    if (remote && historical && !RoutingDiagnostics::feedback && RoutingDiagnostics::delayNs) {
+        auto &s = S_diagnostic[RoutingDiagnostics::Group(ch.sip)];
+        ++s.staleReads;
+        const int64_t now = Simulator::Now().GetNanoSeconds();
+        const int64_t cutoff = now - RoutingDiagnostics::delayNs;
+        auto &history = next->m_diagnosticHistory[nextIf];
+        bool found = false;
+        for (auto it = history.rbegin(); it != history.rend(); ++it) {
+            if (it->first <= cutoff) {
+                bytes = it->second; s.informationAgeNs += now - it->first;
+                found = true; break;
+            }
+        }
+        if (!found) { bytes = 0; ++s.missingHistory; }
+    }
+    Ptr<QbbNetDevice> second = DynamicCast<QbbNetDevice>(next->GetDevice(nextIf));
+    return delay + (bytes + 1000.0) * 8e9 / second->GetDataRate().GetBitRate();
+}
+
+uint32_t SwitchNode::DiagnosticRoute(Ptr<Packet> p, CustomHeader &ch,
+                                    const std::vector<int> &nexthops) {
+    if (!RoutingDiagnostics::enabled) NS_FATAL_ERROR("LB_MODE 12 requires DIAG_ENABLE");
+    if (!m_isToR || !m_isToR_hostIP.count(ch.sip) || nexthops.size() == 1)
+        return DoLbFlowECMP(p, ch, nexthops);
+    const uint64_t key = ConWeaveRouting::GetFlowKey(ch.sip, ch.dip, ch.udp.sport, ch.udp.dport);
+    auto &flow = m_diagnosticFlows[key];
+    const int64_t now = Simulator::Now().GetNanoSeconds();
+    if (RouteLearning::mode==8 && flow.port) {
+        flow.lastNs=now;return flow.port;
+    }
+    if (RouteLearning::mode==9 && flow.port) {
+        const auto &ack=m_routeAcks[key];
+        const bool fresh=uint64_t(ch.udp.seq)>=flow.sentEnd;
+        const bool spaced=now-flow.decisionNs>=int64_t(RouteLearning::intervalNs);
+        const bool drained=ack.lastNs>=0 && uint64_t(ack.sequence)>=flow.sentEnd;
+        const bool gap=now-flow.lastNs>=int64_t(RouteLearning::intervalNs);
+        const bool bounded=ack.lastNs>=0 && flow.sentEnd>=64000 &&
+            flow.sentEnd<=uint64_t(ack.sequence)+8000 && flow.pathChanges<1;
+        const bool allowed=RouteLearning::pathReselect==1 ? drained :
+            RouteLearning::pathReselect==2 ? gap : RouteLearning::pathReselect==3 && bounded;
+        if (!fresh || !spaced || !allowed) {flow.lastNs=now;return flow.port;}
+    }
+    if (RouteLearning::mode) flow.maxSequence=std::max(flow.maxSequence,ch.udp.seq);
+    if (flow.firstNs < 0) { flow.firstNs=now; flow.switchNs=now; }
+    if (RouteLearning::mode<8 && RouteLearning::mode && flow.port && flow.decisionNs>=0 &&
+        now-flow.decisionNs < int64_t(RouteLearning::intervalNs)) {
+        m_diagnosticDecisionAgeNs=0;
+        flow.arrivalNs=std::max(flow.arrivalNs,now+DiagnosticPathDelay(flow.port,ch,RoutingDiagnostics::remote,true));
+        flow.informationAgeNs=m_diagnosticDecisionAgeNs;
+        flow.lastNs=now; return flow.port;
+    }
+    if (RouteLearning::mode<8 && flow.port && RoutingDiagnostics::gapNs && now - flow.lastNs <= int64_t(RoutingDiagnostics::gapNs)) {
+        flow.lastNs = now;
+        return flow.port;
+    }
+    ++S_diagnostic[RoutingDiagnostics::Group(ch.sip)].decisions;
+    // Rotate tie order by a deterministic flow hash. No additional RNG draws.
+    uint32_t offset = EcmpHash(reinterpret_cast<const uint8_t*>(&key), sizeof(key), m_ecmpSeed) % nexthops.size();
+    double best = std::numeric_limits<double>::infinity();
+    m_diagnosticDecisionAgeNs = 0;
+    uint32_t port = nexthops[offset];
+    std::map<uint32_t,double> scores;
+    for (uint32_t i = 0; i < nexthops.size(); ++i) {
+        uint32_t candidate = nexthops[(i + offset) % nexthops.size()];
+        double score = DiagnosticPathDelay(candidate, ch, RoutingDiagnostics::remote, true);
+        if (RouteLearning::mode) scores[candidate]=score;
+        if (score < best) { best = score; port = candidate; }
+    }
+    if (RouteLearning::mode>=8) {
+        FlowIDNUMTag id;
+        if (!p->PeekPacketTag(id)) NS_FATAL_ERROR("Initial-path learning requires flow identity");
+        const uint32_t destination=ch.dip;
+        std::vector<RouteLearning::State> states;
+        std::vector<RouteLearning::PressureState> pressure;
+        std::vector<uint32_t> ports;
+        double mean=0,var=0;
+        for(auto s:scores) mean+=s.second/scores.size();
+        for(auto s:scores) var+=(s.second-mean)*(s.second-mean)/scores.size();
+        for(uint32_t i=0;i<nexthops.size();++i) {
+            uint32_t candidate=nexthops[(i+offset)%nexthops.size()];ports.push_back(candidate);
+            Ptr<QbbNetDevice> link=DynamicCast<QbbNetDevice>(m_devices[candidate]);
+            double rate=link->GetDataRate().GetBitRate();
+            double localNs=(CalculateInterfaceLoad(candidate)+1000.)*8e9/rate;
+            double remoteNs=scores[candidate]-localNs;
+            double remoteSerial=DiagnosticPathDelay(candidate,ch,false,true)-localNs;
+            double deltaBytes=0.; uint64_t ageNs=0;
+            const auto *report=FindRouteFeedback(candidate,destination,&deltaBytes,&ageNs);
+            const bool known=report!=nullptr;
+            if (RouteLearning::pressureEnabled) {
+                const auto &localPrefix=m_prefixQueues[candidate];
+                const uint32_t remoteBytes=known ? report->prefixBytes : 0;
+                const uint32_t remoteFlows=known ? report->prefixFlows : 0;
+                pressure.push_back(RouteLearning::PressureState{{localPrefix.bytes*8e3/rate/.2,
+                    remoteBytes*remoteSerial*1e-9/.2,
+                    std::log1p(double(localPrefix.packetsByFlow.size()))/4.,std::log1p(double(remoteFlows))/4.}});
+                if (flow.port) RouteLearning::RecordPressure('P',{uint64_t(now),GetId(),candidate,id.GetId(),i,
+                    localPrefix.bytes,localPrefix.packetsByFlow.size(),remoteBytes,remoteFlows,
+                    destination,ageNs,uint64_t(rate),uint64_t(std::llround(remoteSerial))});
+            }
+            const double age=known ? ageNs*1e-6 : .2;
+            const double remoteDelta=known ? deltaBytes*remoteSerial/1000.*1e-6 : 0.;
+            // Published actors were trained with this input identically zero.
+            // Enabling a local trend requires new normalization and training.
+            const double localDelta=0.;
+            auto work=[now](const RoutePathTraffic &t) {return t.lastNs<0 ? 0. : t.workNs*std::exp(-(now-t.lastNs)/200000.)*1e-6;};
+            // Store traffic by visible destination IP, then aggregate using
+            // the destination prefix learned from a RECEIVED advertisement.
+            double pathWork=0.; int64_t assignedNs=-1;
+            const uint32_t first=known ? report->network : destination;
+            const uint32_t last=known ? report->network | ~report->Mask() : destination;
+            auto it=m_routePathTraffic.lower_bound(std::make_pair(candidate,first));
+            for (;it!=m_routePathTraffic.end() && it->first.first==candidate && it->first.second<=last;++it) {
+                pathWork+=work(it->second); assignedNs=std::max(assignedNs,it->second.assignedNs);
+            }
+            const auto &portTraffic=m_routePathTraffic[std::make_pair(candidate,uint32_t(-1))];
+            const double portWork=work(portTraffic);
+            const double local=localNs*1e-6,remote=remoteNs*1e-6;
+            const double idle=assignedNs<0 ? .2 : std::min(2.,(now-assignedNs)*1e-6);
+            RouteLearning::State state{{local,remote,8e6/rate,remoteSerial*1e-6,
+                std::min(2.,age),remoteDelta,localDelta,pathWork,portWork,
+                local/(local+remote+1e-6),remote*std::min(2.,age),remoteDelta*std::min(2.,age),
+                pathWork*std::min(2.,age),portWork*std::min(2.,age),double(known),
+                std::tanh(remoteDelta/.05),std::log1p(local/.016),std::log1p(remote/.016),
+                std::sqrt(var)*1e-6,(scores[candidate]-best)*1e-6,
+                pathWork/(portWork+.001),idle,mean*1e-6,
+                RouteLearning::mode==9 ? (8e6/rate+remoteSerial*1e-6)*std::log1p(flow.sentEnd/64000.) : 0.}};
+            states.push_back(state);
+        }
+        int previous=-1;
+        for(unsigned i=0;i<ports.size();++i) if(ports[i]==flow.port) previous=i;
+        const auto &gateAck=m_routeAcks[key];
+        RouteLearning::GateContext gateContext{{double(flow.sentEnd),
+            std::max(0.,double(flow.sentEnd)-gateAck.sequence),
+            double(gateAck.lastNs<0 ? now-flow.firstNs : now-gateAck.lastNs),gateAck.rate,
+            double(now-flow.firstNs),double(flow.lastNs<0 ? 0 : now-flow.lastNs),
+            gateAck.nackNs<0 ? 0. : std::exp(-double(now-gateAck.nackNs)/200000.)}};
+        unsigned selected=RouteLearning::ChoosePath(id.GetId(),now,states,previous,gateContext,pressure,key);
+        if (RouteLearning::mode==9)
+            RouteLearning::RecordPathBoundary(id.GetId(),now,flow.sentEnd,m_routeAcks[key].sequence,ch.udp.seq,
+                flow.lastNs<0 ? 0 : now-flow.lastNs,flow.port,ports[selected]);
+        port=ports[selected];best=scores[port];flow.decisionNs=now;
+        if (flow.port && port!=flow.port) ++flow.pathChanges;
+        // A no-op boundary must not masquerade as a new path assignment.
+        if (!flow.port || port!=flow.port)
+            m_routePathTraffic[std::make_pair(port,destination)].assignedNs=now;
+    } else if (RouteLearning::mode && flow.port && port!=flow.port) {
+        FlowIDNUMTag id;
+        if (!p->PeekPacketTag(id)) NS_FATAL_ERROR("Route learning requires a flow identity");
+        const double old=scores.at(flow.port), base=16000.;
+        double mean=0, var=0;
+        for (auto s:scores) mean+=s.second/scores.size();
+        for (auto s:scores) var+=(s.second-mean)*(s.second-mean)/scores.size();
+        auto scaled=[](double ns) {return std::min(1.0,std::log1p(std::max(0.,ns)/16000.)/std::log(1001.));};
+        double oldTrend=0, bestTrend=0;
+        if(flow.previousScores.count(flow.port)) oldTrend=std::tanh((old-flow.previousScores[flow.port])/(base+flow.previousScores[flow.port]));
+        if(flow.previousScores.count(port)) bestTrend=std::tanh((best-flow.previousScores[port])/(base+flow.previousScores[port]));
+        double slack=now+best-flow.arrivalNs;
+        uint64_t age=std::max(flow.informationAgeNs,m_diagnosticDecisionAgeNs);
+        const auto &ack=m_routeAcks[key];
+        double ackProgress=flow.decisionNs>=0 && now>flow.decisionNs ?
+            std::min(1.,std::max(0.,double(ack.sequence)-flow.previousAck)*8./(now-flow.decisionNs)) : 0.;
+        RouteLearning::State state{{scaled(old),scaled(best),scaled(mean),scaled(std::sqrt(var)),
+            (old-best)/(old+base),std::tanh(slack/200000.),scaled(now-flow.lastNs),scaled(age),
+            oldTrend,bestTrend,scaled(DiagnosticPathDelay(flow.port,ch,false,true)),
+            scaled(DiagnosticPathDelay(port,ch,false,true)),scaled(now-flow.firstNs),scaled(now-flow.switchNs),
+            double(flow.lastAction),scaled(flow.decisionNs<0 ? 0 : now-flow.decisionNs),
+            scaled(flow.maxSequence*8.),scaled(ack.sequence*8.),
+            scaled(std::max(0.,double(flow.maxSequence)-ack.sequence)*8.),
+            scaled(ack.lastNs<0 ? now-flow.firstNs : now-ack.lastNs),ack.rate,
+            ack.nackNs<0 ? 0. : std::exp(-double(now-ack.nackNs)/200000.),ackProgress,
+            double(ack.lastNs>=0)}};
+        unsigned action=RouteLearning::Decide(id.GetId(),now,state,slack,age,oldTrend);
+        flow.lastAction=action; flow.decisionNs=now;
+        flow.previousAck=ack.sequence;
+        auto &s=S_diagnostic[RoutingDiagnostics::Group(ch.sip)]; ++s.proposedChanges;
+        if(!action) {port=flow.port;best=old;++s.guardedChanges;}
+        else flow.switchNs=now;
+        flow.previousScores=scores;
+    } else if (!RouteLearning::mode && RoutingDiagnostics::guard && flow.port && port != flow.port) {
+        auto &s = S_diagnostic[RoutingDiagnostics::Group(ch.sip)]; ++s.proposedChanges;
+        uint64_t margin = RoutingDiagnostics::guardMarginNs;
+        if (RoutingDiagnostics::ageGuard)
+            margin = std::max(margin, std::max(flow.informationAgeNs, m_diagnosticDecisionAgeNs));
+        if (now + best < flow.arrivalNs + margin) {
+            port = flow.port; ++s.guardedChanges;
+            best = DiagnosticPathDelay(port, ch, RoutingDiagnostics::remote, true);
+        }
+    }
+    if (RouteLearning::mode && flow.previousScores.empty()) flow.previousScores=scores;
+    flow.arrivalNs = std::max(flow.arrivalNs, now + best);
+    flow.informationAgeNs = m_diagnosticDecisionAgeNs;
+    flow.port = port; flow.lastNs = now;
+    return port;
+}
+
+#include "route-learning.inc"
+
+void SwitchNode::ObservePrefixQueue(uint32_t port, Ptr<Packet> packet, const CustomHeader &ch, bool enqueue) {
+    // Observable prefix packets are a proxy for short flows, never a final-size label.
+    if (ch.l3Prot!=0x11 || ch.udp.seq>=8000) return;
+    const uint64_t flowKey=ConWeaveRouting::GetFlowKey(ch.sip,ch.dip,ch.udp.sport,ch.udp.dport);
+    auto &queue=m_prefixQueues[port];const uint32_t bytes=packet->GetSize();
+    if (enqueue) {queue.bytes+=bytes;++queue.packetsByFlow[flowKey];}
+    else {
+        auto flow=queue.packetsByFlow.find(flowKey);
+        if (queue.bytes<bytes || flow==queue.packetsByFlow.end() || !flow->second)
+            NS_FATAL_ERROR("Prefix queue accounting underflow");
+        queue.bytes-=bytes;
+        if (!--flow->second) queue.packetsByFlow.erase(flow);
+    }
+    RouteLearning::RecordPressure(enqueue ? 'E' : 'D',{uint64_t(Simulator::Now().GetNanoSeconds()),GetId(),port,flowKey,
+        bytes,ch.udp.seq,queue.bytes,queue.packetsByFlow.size(),packet->GetUid()});
+}
+
+void SwitchNode::DiagnosticObserve(Ptr<Packet> p, CustomHeader &ch, uint32_t outIf) {
+    if (ch.l3Prot != 0x11 || !m_isToR || !m_isToR_hostIP.count(ch.sip)) return;
+    auto route = m_rtTable.find(ch.dip);
+    if (route == m_rtTable.end() || route->second.size() <= 1) return;
+    if (RouteLearning::mode>=8) {
+        int64_t now=Simulator::Now().GetNanoSeconds();
+        double work=p->GetSize()*8e9/DynamicCast<QbbNetDevice>(m_devices[outIf])->GetDataRate().GetBitRate();
+        for(uint32_t destination : {ch.dip,uint32_t(-1)}) {
+            auto &t=m_routePathTraffic[std::make_pair(outIf,destination)];
+            t.workNs=(t.lastNs<0 ? 0. : t.workNs*std::exp(-(now-t.lastNs)/200000.))+work;t.lastNs=now;
+        }
+        if (RouteLearning::mode==9) {
+            const uint64_t flowKey=ConWeaveRouting::GetFlowKey(ch.sip,ch.dip,ch.udp.sport,ch.udp.dport);
+            auto flow=m_diagnosticFlows.find(flowKey);
+            if (flow!=m_diagnosticFlows.end())
+                flow->second.sentEnd=std::max(flow->second.sentEnd,uint64_t(ch.udp.seq)+p->GetSize()-ch.GetSerializedSize());
+        }
+    }
+    auto &s = S_diagnostic[RoutingDiagnostics::Group(ch.sip)];
+    ++s.packets; s.bytes += p->GetSize();
+    const uint64_t key = ConWeaveRouting::GetFlowKey(ch.sip, ch.dip, ch.udp.sport, ch.udp.dport);
+    auto inserted = m_diagnosticObservedPorts.emplace(key, outIf);
+    if (!inserted.second && inserted.first->second != outIf) {
+        ++s.routeChanges; inserted.first->second = outIf;
+    }
+    // Oracle counters are excluded from every RL/report-based run.
+    if (RouteLearning::mode || RoutingDiagnostics::feedback) return;
+    // Read-only shadow counterfactual at the actual source egress, including
+    // cached-flowlet packets. Queue regret is descriptive, not an FCT bound.
+    double chosen = DiagnosticPathDelay(outIf, ch, true, false);
+    Ptr<QbbNetDevice> local = DynamicCast<QbbNetDevice>(m_devices[outIf]);
+    s.localQueueNs += CalculateInterfaceLoad(outIf) * 8e9 / local->GetDataRate().GetBitRate();
+    s.remoteQueueNs += chosen - DiagnosticPathDelay(outIf, ch, false, false);
+    double best = chosen;
+    for (int candidate : route->second)
+        best = std::min(best, DiagnosticPathDelay(candidate, ch, true, false));
+    s.chosenDelayNs += chosen;
+    s.queueRegretNs += chosen - best;
+    if (chosen > best + 1) ++s.suboptimal;
 }
 
 } /* namespace ns3 */

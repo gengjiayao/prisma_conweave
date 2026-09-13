@@ -55,6 +55,7 @@ def build(bld):
 		'model/rdma-queue-pair.h',
 		'model/rdma-hw.h',
 		'model/switch-node.h',
+        'model/route-feedback.h',
 		'model/switch-mmu.h',
         'model/settings.h',
 		'helper/sim-setting.h',

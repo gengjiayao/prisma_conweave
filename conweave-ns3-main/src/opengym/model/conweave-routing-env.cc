@@ -278,7 +278,9 @@ ConweaveRoutingEnv::GetExtraInfo() //9.5版本
   // Python 端用 tokens[18].split('=')[-1].split(';')[:-1] 解析
   oss << "lost_packets_id=" << lostList << ","
       << "action_applied=" << actionApplied << ","
-      << "action_seq=" << actionSeq;
+      << "action_seq=" << actionSeq << ","
+      << "flow_has_previous_action=" << (m_obsMgr->CurrentFlowletHasPreviousAction() ? 1 : 0) << ","
+      << "flow_key=" << m_obsMgr->GetCurrentFlowKey();
 
   return oss.str();
 }

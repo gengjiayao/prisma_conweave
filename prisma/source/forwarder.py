@@ -15,6 +15,7 @@ from source.rl_contract import (
     validate_observation_shape,
 )
 from source.models import *
+from source.routing_experiments import diagnostic_scores, choose_hysteresis_action, choose_balanced_action
 import operator
 import pandas as pd
 import time
@@ -64,6 +65,8 @@ class Forwarder(Agent):
         self.signaling = False
         self.pkt_id = -1
         self.ecmp_action = -1
+        self.flow_has_previous_action = None
+        self.flow_key = None
         if init:
             ## define the agent
             if self.agent_type == "dqn_buffer":
@@ -191,6 +194,9 @@ class Forwarder(Agent):
         self.policy_action_counts = np.zeros(self.env.action_space.n, dtype=np.int64)
         self.greedy_action_counts = np.zeros(self.env.action_space.n, dtype=np.int64)
         self.policy_decision_count = 0
+        self.route_change_stats = dict(metadata_decisions=0, established_route_decisions=0,
+                                       native_would_switch=0, switched=0, suppressed=0)
+        self.balance_stats = dict(decisions=0, changed_from_native=0, max_score_deficit=0.0)
         self.random_action_decisions = 0
         self.greedy_action_decisions = 0
         self.behavior_matches_greedy = 0
@@ -267,6 +273,8 @@ class Forwarder(Agent):
 
     def _record_q_values(self, q_values):
         values = np.asarray(q_values, dtype=np.float64).reshape(-1)
+        if not np.all(np.isfinite(values)):
+            raise ValueError("Policy produced non-finite action scores")
         self.q_value_count += int(values.size)
         self.q_value_min = min(self.q_value_min, float(np.min(values)))
         self.q_value_max = max(self.q_value_max, float(np.max(values)))
@@ -470,7 +478,21 @@ class Forwarder(Agent):
                         update_eps,
                         step=int((Agent.base_curr_time + Agent.curr_time) * 1e6),
                     )
-            if bool(getattr(Agent, "eval_prior_only", False)):
+            score_mode = getattr(Agent, 'eval_score_mode', 'native')
+            if score_mode != 'native':
+                if self.train or update_eps != 0.0:
+                    raise RuntimeError('Diagnostic policy requires deterministic evaluation')
+                learned_q = None
+                if score_mode == 'guard':
+                    _, _, _, q = Agent.agents[self.index].step(
+                        obs_in, False, 0.0, return_diagnostics=True)
+                    learned_q = q.numpy()
+                q_values_array = diagnostic_scores(
+                    obs_in, score_mode, learned_q=learned_q, **Agent.eval_delay_settings)
+                action = int(np.argmax(q_values_array[0]))
+                greedy_action = action
+                used_random = False
+            elif bool(getattr(Agent, "eval_prior_only", False)):
                 if self.train or update_eps != 0.0:
                     raise RuntimeError(
                         "Prior-only policy is valid only for deterministic frozen evaluation"
@@ -479,7 +501,26 @@ class Forwarder(Agent):
                     obs_in,
                     num_actions=int(self.env.action_space.n),
                 )
-                action = int(np.argmax(q_values_array[0]))
+                previous_action = int(obs[1])
+                if Agent.eval_balance_band:
+                    action = choose_balanced_action(q_values_array[0], self.flow_key, Agent.eval_balance_band)
+                    self.balance_stats['decisions'] += 1
+                    self.balance_stats['changed_from_native'] += int(action != int(np.argmax(q_values_array[0])))
+                    deficit = float(np.max(q_values_array[0])) - float(q_values_array[0, action])
+                    self.balance_stats['max_score_deficit'] = max(self.balance_stats['max_score_deficit'], deficit)
+                else:
+                    action = choose_hysteresis_action(
+                        q_values_array[0], previous_action,
+                        self.flow_has_previous_action, Agent.eval_switch_margin)
+                if self.flow_has_previous_action is not None:
+                    self.route_change_stats['metadata_decisions'] += 1
+                    if self.flow_has_previous_action:
+                        native_switch = int(np.argmax(q_values_array[0])) != previous_action
+                        switched = action != previous_action
+                        self.route_change_stats['established_route_decisions'] += 1
+                        self.route_change_stats['native_would_switch'] += int(native_switch)
+                        self.route_change_stats['switched'] += int(switched)
+                        self.route_change_stats['suppressed'] += int(native_switch and not switched)
                 greedy_action = action
                 used_random = False
             else:
@@ -526,6 +567,8 @@ class Forwarder(Agent):
         """
         # 兼容空/非字符串的 info（如初始握手返回 {}）：直接视为控制信息，跳过处理
         if not isinstance(info, str) or len(info) == 0:
+            self.flow_has_previous_action = None
+            self.flow_key = None
             self.action_applied = False
             self.action_seq = None
             self.pkt_type = -1
@@ -538,6 +581,16 @@ class Forwarder(Agent):
                 kv[k.strip()] = v.strip()
         self.action_applied = True
         self.action_seq = None
+        self.flow_has_previous_action = None
+        # Parse as an integer directly: a float round-trip loses 64-bit keys.
+        self.flow_key = int(kv['flow_key']) if 'flow_key' in kv else None
+        if self.flow_key is not None and not 0 <= self.flow_key < (1 << 64):
+            raise ValueError('Invalid unsigned 64-bit flow key')
+        if 'flow_has_previous_action' in kv:
+            value = int(kv['flow_has_previous_action'])
+            if value not in (0, 1):
+                raise ValueError('Invalid current-flowlet route-ownership flag')
+            self.flow_has_previous_action = bool(value)
         if "action_applied" in kv:
             try:
                 self.action_applied = bool(int(kv["action_applied"]))
