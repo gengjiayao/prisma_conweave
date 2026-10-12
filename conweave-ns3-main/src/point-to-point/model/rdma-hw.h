@@ -49,6 +49,7 @@ class RdmaHw : public Object {
 
     void SetNode(Ptr<Node> node);
     void Setup(QpCompleteCallback cb);  // setup shared data and callbacks with the QbbNetDevice
+    void SendFlowCostReport(const std::vector<uint8_t>& payload);
 
     /* Akashic Record of finished QP */
     std::unordered_set<uint64_t> akashic_Qp;    // instance for each src

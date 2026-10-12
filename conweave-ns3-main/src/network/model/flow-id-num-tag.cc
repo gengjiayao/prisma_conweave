@@ -11,7 +11,7 @@ namespace ns3 {
 
 	FlowIDNUMTag::FlowIDNUMTag() :
 		Tag(),
-		flow_stat(0)
+		flow_stat(0), flow_size(0)
 	{
 	}
 
@@ -40,14 +40,14 @@ namespace ns3 {
 	void
 		FlowIDNUMTag::Serialize(TagBuffer i) const
 	{
-		i.WriteU16(flow_stat);
+		i.WriteU32(static_cast<uint32_t>(flow_stat));
 		i.WriteU32(flow_size);
 	}
 
 	void
 		FlowIDNUMTag::Deserialize(TagBuffer i)
 	{
-		flow_stat = i.ReadU16();
+		flow_stat = static_cast<int32_t>(i.ReadU32());
 		flow_size = i.ReadU32();
 	}
 

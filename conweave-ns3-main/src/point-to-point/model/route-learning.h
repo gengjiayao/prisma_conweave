@@ -36,7 +36,7 @@ struct RouteLearning {
     static void Complete(uint32_t flowId, int64_t now);
     static unsigned ChoosePath(uint32_t flowId, int64_t now, const std::vector<State> &states,
                                int previousCandidate = -1, GateContext context = {},
-                               const std::vector<PressureState> &pressure = {}, uint64_t flowKey = 0);
+                               const std::vector<PressureState> &pressure = {}, uint64_t flowKey = 0, uint32_t node = 0, const std::vector<uint32_t>& ports = {}, const std::vector<uint64_t>& prefixes = {});
     static void RecordPathBoundary(uint32_t flowId, int64_t now, uint64_t sentEnd,
                                    uint64_t cumulativeAck, uint64_t sequence, uint64_t gapNs,
                                    uint32_t previousPort, uint32_t selectedPort);

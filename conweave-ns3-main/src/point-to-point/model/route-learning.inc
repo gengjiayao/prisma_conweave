@@ -145,7 +145,7 @@ void RouteLearning::Initialize() {
     }
 }
 unsigned RouteLearning::ChoosePath(uint32_t flowId, int64_t now, const std::vector<State> &states,
-                                   int previousCandidate, GateContext context, const std::vector<PressureState> &pressure, uint64_t flowKey) {
+                                   int previousCandidate, GateContext context, const std::vector<PressureState> &pressure, uint64_t flowKey, uint32_t node, const std::vector<uint32_t>& ports, const std::vector<uint64_t>& prefixes) {
     if (mode<8 || states.empty() || states.size()>8 || (mode==8 && routePending.count(flowId)) || routeCompleted.count(flowId))
         NS_FATAL_ERROR("Invalid initial-path decision");
     std::vector<double> scores;
@@ -164,11 +164,15 @@ unsigned RouteLearning::ChoosePath(uint32_t flowId, int64_t now, const std::vect
         // Fixed hash order resolves numerical ties in equivalent delay sums.
         if (score<best-1e-12) {chosen=candidate;best=score;}
     }
+    if(OfflinePath::enabled) chosen=OfflinePath::Select(node,flowKey,flowId,now,states,ports,prefixes,scores,chosen);
+    if(CoordinatedPath::enabled) chosen=CoordinatedPath::Select(node,flowKey,flowId,now,states,ports,prefixes,scores);
+    if(OnlineRouting::enabled) chosen=OnlineRouting::Select(node,flowKey,now,states,ports,scores);
+    if(FlowActorCritic::enabled) chosen=FlowActorCritic::Select(node,flowKey,now,states,ports,context,previousCandidate,scores);
     const unsigned proposal=chosen;
     std::array<double,32> gateState{}; double gateQ[2]={0,0};
     if (previousCandidate>=0) {
         if (unsigned(previousCandidate)>=states.size()) NS_FATAL_ERROR("Invalid previous path");
-        if (scores[previousCandidate]-scores[chosen] <= marginNs*1e-6) chosen=previousCandidate;
+        if (!OnlineRouting::enabled && !FlowActorCritic::enabled && scores[previousCandidate]-scores[chosen] <= marginNs*1e-6) chosen=previousCandidate;
         if (gateMode) {
             const auto &old=states[previousCandidate]; const auto &next=states[proposal];
             gateState=std::array<double,32>{{(scores[previousCandidate]-scores[proposal])/.2,

@@ -2,6 +2,11 @@
 #include "weighted-ecmp.h"
 #include "routing-diagnostics.h"
 #include "route-learning.h"
+#include "online-routing.h"
+#include "flow-actor-critic.h"
+#include "offline-path.h"
+#include "coordinated-path.h"
+#include <set>
 #include <random>
 #include <unordered_set>
 #include "qbb-header.h"
@@ -28,6 +33,7 @@
 #include "qbb-net-device.h"
 #include <atomic>
 #include <chrono>
+#include <functional>
 
 
 NS_LOG_COMPONENT_DEFINE("SwitchNode");
@@ -441,6 +447,30 @@ void SwitchNode::CheckAndSendResume(uint32_t inDev, uint32_t qIndex) {
 bool SwitchNode::SwitchReceiveFromDevice(Ptr<NetDevice> device, Ptr<Packet> packet,
                                          CustomHeader &ch) {
     m_traceMacRx(device,packet);  // 9.9trace callback
+    if(ch.l3Prot==FlowActorCritic::PROTOCOL) {
+        if(m_isToR && m_isToR_hostIP.count(ch.dip)) {
+            Ptr<Packet> payload=packet->Copy();PppHeader ppp;Ipv4Header ip;
+            payload->RemoveHeader(ppp);payload->RemoveHeader(ip);
+            std::vector<uint8_t> bytes(payload->GetSize());payload->CopyData(bytes.data(),bytes.size());
+            const auto broadcast=FlowActorCritic::Receive(GetId(),bytes,Simulator::Now().GetNanoSeconds());
+            if(!broadcast.empty()) {
+                std::map<uint32_t,uint32_t> representatives;
+                for(const auto &e:Settings::hostIp2SwitchId)representatives.emplace(e.second,e.first);
+                for(const auto &dst:representatives)if(dst.first!=GetId()) {
+                    Ptr<Packet> p=Create<Packet>(broadcast.data(),broadcast.size());Ipv4Header header;
+                    header.SetSource(Ipv4Address(representatives.at(GetId())));header.SetDestination(Ipv4Address(dst.second));
+                    header.SetProtocol(FlowActorCritic::PROTOCOL);header.SetTtl(64);header.SetPayloadSize(p->GetSize());p->AddHeader(header);
+                    PppHeader link;link.SetProtocol(0x0021);p->AddHeader(link);FlowIdTag tag;tag.SetFlowId(Settings::CONWEAVE_CTRL_DUMMY_INDEV);p->AddPacketTag(tag);
+                    CustomHeader h(CustomHeader::L2_Header|CustomHeader::L3_Header|CustomHeader::L4_Header);p->PeekHeader(h);
+                    const auto &hops=m_rtTable.at(dst.second);uint32_t port=hops[(GetId()+dst.first)%hops.size()];
+                    FlowActorCritic::CountWire(p->GetSize());DoSwitchSend(p,h,port,0);
+                }
+            }
+        } else {
+            const auto &hops=m_rtTable.at(ch.dip);DoSwitchSend(packet,ch,hops[(ch.sip+ch.dip)%hops.size()],0);
+        }
+        return true;
+    }
     if (RouteLearning::mode && m_isToR && m_isToR_hostIP.count(ch.dip) &&
         (ch.l3Prot==0xFC || ch.l3Prot==0xFD)) {
         uint64_t key=ConWeaveRouting::GetFlowKey(ch.dip,ch.sip,ch.ack.dport,ch.ack.sport);
@@ -450,6 +480,8 @@ bool SwitchNode::SwitchReceiveFromDevice(Ptr<NetDevice> device, Ptr<Packet> pack
             ack.rate=.8*ack.rate+.2*std::min(1.,rate);
         }
         ack.sequence=std::max(ack.sequence,ch.ack.seq);ack.lastNs=now;
+        OnlineRouting::Ack(GetId(),key,ch.ack.seq,now);
+        FlowActorCritic::Ack(GetId(),key,ch.ack.seq,now);
         // IRN uses the NACK protocol number even for ordinary cumulative ACKs.
         // A nonzero selective range identifies out-of-order reception feedback.
         if(ch.l3Prot==0xFD && ch.ack.irnNackSize>0) ack.nackNs=now;
@@ -1084,9 +1116,11 @@ uint32_t SwitchNode::DiagnosticRoute(Ptr<Packet> p, CustomHeader &ch,
         FlowIDNUMTag id;
         if (!p->PeekPacketTag(id)) NS_FATAL_ERROR("Initial-path learning requires flow identity");
         const uint32_t destination=ch.dip;
+        CoordinatedPath::Prepare(GetId(),destination,now);
         std::vector<RouteLearning::State> states;
         std::vector<RouteLearning::PressureState> pressure;
         std::vector<uint32_t> ports;
+        std::vector<uint64_t> prefixes;
         double mean=0,var=0;
         for(auto s:scores) mean+=s.second/scores.size();
         for(auto s:scores) var+=(s.second-mean)*(s.second-mean)/scores.size();
@@ -1138,6 +1172,10 @@ uint32_t SwitchNode::DiagnosticRoute(Ptr<Packet> p, CustomHeader &ch,
                 std::sqrt(var)*1e-6,(scores[candidate]-best)*1e-6,
                 pathWork/(portWork+.001),idle,mean*1e-6,
                 RouteLearning::mode==9 ? (8e6/rate+remoteSerial*1e-6)*std::log1p(flow.sentEnd/64000.) : 0.}};
+            const uint64_t prefix=(uint64_t(known ? report->network : destination)<<8)|(known ? report->prefix : 32u);
+            prefixes.push_back(prefix);
+            OfflinePath::Features(GetId(),candidate,prefix,now,state);
+            CoordinatedPath::Features(GetId(),candidate,prefix,now,state);
             states.push_back(state);
         }
         int previous=-1;
@@ -1148,7 +1186,7 @@ uint32_t SwitchNode::DiagnosticRoute(Ptr<Packet> p, CustomHeader &ch,
             double(gateAck.lastNs<0 ? now-flow.firstNs : now-gateAck.lastNs),gateAck.rate,
             double(now-flow.firstNs),double(flow.lastNs<0 ? 0 : now-flow.lastNs),
             gateAck.nackNs<0 ? 0. : std::exp(-double(now-gateAck.nackNs)/200000.)}};
-        unsigned selected=RouteLearning::ChoosePath(id.GetId(),now,states,previous,gateContext,pressure,key);
+        unsigned selected=RouteLearning::ChoosePath(id.GetId(),now,states,previous,gateContext,pressure,key,GetId(),ports,prefixes);
         if (RouteLearning::mode==9)
             RouteLearning::RecordPathBoundary(id.GetId(),now,flow.sentEnd,m_routeAcks[key].sequence,ch.udp.seq,
                 flow.lastNs<0 ? 0 : now-flow.lastNs,flow.port,ports[selected]);
@@ -1208,6 +1246,10 @@ uint32_t SwitchNode::DiagnosticRoute(Ptr<Packet> p, CustomHeader &ch,
 }
 
 #include "route-learning.inc"
+#include "online-routing.inc"
+#include "flow-actor-critic.inc"
+#include "offline-path.inc"
+#include "coordinated-path.inc"
 
 void SwitchNode::ObservePrefixQueue(uint32_t port, Ptr<Packet> packet, const CustomHeader &ch, bool enqueue) {
     // Observable prefix packets are a proxy for short flows, never a final-size label.
@@ -1232,6 +1274,12 @@ void SwitchNode::DiagnosticObserve(Ptr<Packet> p, CustomHeader &ch, uint32_t out
     if (route == m_rtTable.end() || route->second.size() <= 1) return;
     if (RouteLearning::mode>=8) {
         int64_t now=Simulator::Now().GetNanoSeconds();
+        OnlineRouting::Data(GetId(),ConWeaveRouting::GetFlowKey(ch.sip,ch.dip,ch.udp.sport,ch.udp.dport),outIf,
+            ch.udp.seq,uint64_t(ch.udp.seq)+p->GetSize()-ch.GetSerializedSize(),now);
+        FlowActorCritic::Data(GetId(),ConWeaveRouting::GetFlowKey(ch.sip,ch.dip,ch.udp.sport,ch.udp.dport),outIf,
+            ch.udp.seq,uint64_t(ch.udp.seq)+p->GetSize()-ch.GetSerializedSize(),now);
+        CoordinatedPath::Data(GetId(),ConWeaveRouting::GetFlowKey(ch.sip,ch.dip,ch.udp.sport,ch.udp.dport),outIf,
+            uint64_t(ch.udp.seq)+p->GetSize()-ch.GetSerializedSize(),now);
         double work=p->GetSize()*8e9/DynamicCast<QbbNetDevice>(m_devices[outIf])->GetDataRate().GetBitRate();
         for(uint32_t destination : {ch.dip,uint32_t(-1)}) {
             auto &t=m_routePathTraffic[std::make_pair(outIf,destination)];

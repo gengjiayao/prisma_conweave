@@ -36,6 +36,10 @@
 #include "ns3/conga-routing.h"
 #include "../src/point-to-point/model/routing-diagnostics.h"
 #include "../src/point-to-point/model/route-learning.h"
+#include "../src/point-to-point/model/online-routing.h"
+#include "../src/point-to-point/model/flow-actor-critic.h"
+#include "../src/point-to-point/model/offline-path.h"
+#include "../src/point-to-point/model/coordinated-path.h"
 #include "ns3/conweave-voq.h"
 #include "ns3/core-module.h"
 #include "ns3/error-model.h"
@@ -341,6 +345,8 @@ struct FlowInput {
     uint32_t idx;
 };
 FlowInput flow_input = {0};  // global variable
+std::string collective_plan_file, collective_event_file;
+std::ofstream collective_events;
 uint32_t flow_num;
 
 /**
@@ -363,9 +369,7 @@ void ReadFlowInput() {
 /**
  * Scheduling flows given in /config/L_XX....txt file
  */
-void ScheduleFlowInputs(FILE *infile) {
-    //NS_LOG_DEBUG("ScheduleFlowInputs at " << Simulator::Now());
-    while (flow_input.idx < flow_num && Seconds(flow_input.start_time) == Simulator::Now()) {
+void StartFlowInput(const FlowInput &flow_input, FILE *infile) {
         uint32_t pg, src, dst, sport, dport, maxPacketCount, target_len;
         pg = flow_input.pg;
         src = flow_input.src;
@@ -378,6 +382,12 @@ void ScheduleFlowInputs(FILE *infile) {
         // dst port
         dport = dportNumber[dst];
         dportNumber[dst] = dportNumber[dst] + 1;
+
+        if (collective_events.is_open()) {
+            collective_events << "start " << flow_input.idx << " " << Simulator::Now().GetNanoSeconds()
+                << " " << src << " " << dst << " " << sport << " " << dport
+                << " " << flow_input.maxPacketCount << "\n";
+        }
 
         target_len = flow_input.maxPacketCount;  // this is actually not packet-count, but bytes
         if (target_len == 0) {
@@ -442,6 +452,13 @@ void ScheduleFlowInputs(FILE *infile) {
         appCon.Start(Seconds(Time(0)));
         appCon.Stop(Seconds(100.0));
 
+}
+
+#include "collective-scheduler.h"
+
+void ScheduleFlowInputs(FILE *infile) {
+    while (flow_input.idx < flow_num && Seconds(flow_input.start_time) == Simulator::Now()) {
+        StartFlowInput(flow_input, infile);
         flow_input.idx++;
         ReadFlowInput();
     }
@@ -697,6 +714,7 @@ void qp_finish(FILE *fout, Ptr<RdmaQueuePair> q) {
     //          << standalone_fct);
     Settings::cnt_finished_flows++;
     if (fout) fflush(fout);
+    if (!collective_plan_file.empty()) CollectiveComplete(q->m_flow_id);
 }
 
 /**
@@ -780,7 +798,8 @@ void stop_simulation_middle() {
         if (lb_mode == 9) {  // CONWEAVE
             conweave_history_print();
         }
-        Simulator::Stop(NanoSeconds(1));  // finish soon, stop this schedule (NECESSARY!)
+        // Complete reward reports and the last rollout after all data flows finish.
+        Simulator::Stop(NanoSeconds(FlowActorCritic::enabled ? (FlowActorCritic::rolloutWindows+3)*FlowActorCritic::periodNs : 1));
         return;
     }
 
@@ -963,7 +982,11 @@ int main(int argc, char *argv[]) {
         while (!conf.eof()) {
             std::string key;
             conf >> key;
-            if (key.compare("FLOW_INPUT_FILE") == 0) {
+            if (key == "COLLECTIVE_PLAN_FILE") {
+                conf >> collective_plan_file;
+            } else if (key == "COLLECTIVE_EVENT_FILE") {
+                conf >> collective_event_file;
+            } else if (key.compare("FLOW_INPUT_FILE") == 0) {
                 std::string v;
                 conf >> v;
                 flow_input_file = v;
@@ -983,6 +1006,70 @@ int main(int argc, char *argv[]) {
                 conf >> v;
                 lb_mode = v;
                 std::cerr << "LB_MODE\t\t\t" << lb_mode << "\n";
+            } else if (key == "COORD_ENABLE") {
+                conf >> CoordinatedPath::enabled;
+            } else if (key == "COORD_BALANCE") {
+                conf >> CoordinatedPath::balance;
+            } else if (key == "COORD_WORK") {
+                conf >> CoordinatedPath::work;
+            } else if (key == "COORD_CONDITIONAL") {
+                conf >> CoordinatedPath::conditional;
+            } else if (key == "COORD_PACKET_LOG") {
+                conf >> CoordinatedPath::packetLog;
+            } else if (key == "COORD_SEED") {
+                conf >> CoordinatedPath::seed;
+            } else if (key == "COORD_MODEL") {
+                conf >> CoordinatedPath::model;
+            } else if (key == "OFFLINE_PATH_ENABLE") {
+                conf >> OfflinePath::enabled;
+            } else if (key == "OFFLINE_PATH_RESERVATIONS") {
+                conf >> OfflinePath::reservations;
+            } else if (key == "OFFLINE_PATH_SPREAD") {
+                conf >> OfflinePath::spread;
+            } else if (key == "OFFLINE_PATH_DECAY_NS") {
+                conf >> OfflinePath::decayNs;
+            } else if (key == "OFFLINE_PATH_NEAR_MS") {
+                conf >> OfflinePath::nearMs;
+            } else if (key == "OFFLINE_PATH_SEED") {
+                conf >> OfflinePath::seed;
+            } else if (key == "FAC_ENABLE") {
+                conf >> FlowActorCritic::enabled;
+            } else if (key == "FAC_LEARN") {
+                conf >> FlowActorCritic::learn;
+            } else if (key == "FAC_ACTOR_STEP") {
+                conf >> FlowActorCritic::actorStep;
+            } else if (key == "FAC_CRITIC_STEP") {
+                conf >> FlowActorCritic::criticStep;
+            } else if (key == "FAC_SEED") {
+                conf >> FlowActorCritic::seed;
+            } else if (key == "FAC_REWARD_MODE") {
+                conf >> FlowActorCritic::rewardMode;
+            } else if (key == "FAC_PERIOD_NS") {
+                conf >> FlowActorCritic::periodNs;
+            } else if (key == "FAC_ROLLOUT_WINDOWS") {
+                conf >> FlowActorCritic::rolloutWindows;
+            } else if (key == "FAC_COMPUTE_NS") {
+                conf >> FlowActorCritic::computeNs;
+            } else if (key == "FAC_TAU95_NS") {
+                conf >> FlowActorCritic::tau95Ns;
+            } else if (key == "FAC_TAU99_NS") {
+                conf >> FlowActorCritic::tau99Ns;
+            } else if (key == "FAC_TEMPERATURE") {
+                conf >> FlowActorCritic::temperature;
+            } else if (key == "ONLINE_ENABLE") {
+                conf >> OnlineRouting::enabled;
+            } else if (key == "ONLINE_LEARN") {
+                conf >> OnlineRouting::learn;
+            } else if (key == "ONLINE_STEP") {
+                conf >> OnlineRouting::step;
+            } else if (key == "ONLINE_EXPLORATION") {
+                conf >> OnlineRouting::exploration;
+            } else if (key == "ONLINE_SEED") {
+                conf >> OnlineRouting::seed;
+            } else if (key == "ONLINE_RESERVATION_WEIGHT") {
+                conf >> OnlineRouting::reservationWeight;
+            } else if (key == "ONLINE_UPDATE_DELAY_NS") {
+                conf >> OnlineRouting::updateDelayNs;
             } else if (key == "RL_SWITCH_MODE") {
                 conf >> RouteLearning::mode;
             } else if (key == "RL_PATH_RESELECT") {
@@ -1752,6 +1839,7 @@ int main(int argc, char *argv[]) {
     topo2bdpMap[std::string("fat_k8_100G_OS2")] = 156000;      // RTT=12480 --> all 100G links
     topo2bdpMap[std::string("leaf_spine_128_100G_asym_OS2")] = 5000;  // [Asym Adversarial] same BDP as symmetric (1Gbps dominates)
     topo2bdpMap[std::string("leaf_spine_1024_1G_asym_OS2")] = 5000;  // Same rates and path length; 64 leaves instead of eight.
+    topo2bdpMap[std::string("leaf_spine_128_750M_sym")] = 4249;  // 8 x 750Mbps uplinks, 1Gbps hosts, 1us links; checked below.
 
     // topology_file
     bool found_topo2bdpMap = false;
@@ -2138,7 +2226,9 @@ int main(int argc, char *argv[]) {
 
     flow_input.idx = 0;
     port_per_host = new uint16_t[node_num - switch_num];
-    if (flow_num > 0) {
+    if (!collective_plan_file.empty()) {
+        InitializeCollective();
+    } else if (flow_num > 0) {
         // generate flows
         ReadFlowInput();
         Simulator::Schedule(Seconds(0), &ScheduleFlowInputs, flow_input_stream);
@@ -2294,6 +2384,11 @@ int main(int argc, char *argv[]) {
     if (RouteLearning::mode && (lb_mode!=12 || !RoutingDiagnostics::feedback || !RoutingDiagnostics::remote || RoutingDiagnostics::gapNs))
         NS_FATAL_ERROR("Route learning requires LB 12 with remote reports and zero flowlet gap");
     RouteLearning::Initialize();
+    OnlineRouting::Initialize();
+    FlowActorCritic::startNs=std::llround(flowgen_start_time*1e9);
+    FlowActorCritic::Initialize();
+    OfflinePath::Initialize();
+    CoordinatedPath::Initialize();
     Simulator::Stop(Seconds(flowgen_stop_time + simulator_extra_time));
     if (RoutingDiagnostics::enabled) {
         NS_ASSERT_MSG(RoutingDiagnostics::sampleNs > 0 && RoutingDiagnostics::delayNs <= 10000000,
@@ -2313,6 +2408,10 @@ int main(int argc, char *argv[]) {
     }
     Simulator::Run();
     RoutingDiagnostics::Write();
+    OnlineRouting::Finish();
+    FlowActorCritic::Finish();
+    OfflinePath::Finish();
+    CoordinatedPath::Finish();
     RouteLearning::Finish(Simulator::Now().GetNanoSeconds());
     if (RoutingDiagnostics::enabled) {
         std::ofstream audit((RoutingDiagnostics::output + ".unfinished.jsonl").c_str());

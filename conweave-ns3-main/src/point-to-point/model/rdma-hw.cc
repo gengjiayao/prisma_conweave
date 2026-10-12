@@ -1,5 +1,6 @@
 #include "rdma-hw.h"
 #include "routing-diagnostics.h"
+#include "flow-actor-critic.h"
 
 #include <ns3/ipv4-header.h>
 #include <ns3/seq-ts-header.h>
@@ -155,6 +156,18 @@ void RdmaHw::Setup(QpCompleteCallback cb) {
     }
     // setup qp complete callback
     m_qpCompleteCallback = cb;
+    if (FlowActorCritic::enabled)
+        FlowActorCritic::RegisterHost(m_node->GetId(), [this](const std::vector<uint8_t>& b){SendFlowCostReport(b);});
+}
+
+void RdmaHw::SendFlowCostReport(const std::vector<uint8_t>& payload) {
+    Ptr<Packet> p=Create<Packet>(payload.data(),payload.size());
+    Ipv4Header ip;uint32_t address=Settings::hostId2IpMap.at(m_node->GetId());
+    ip.SetSource(Ipv4Address(address));ip.SetDestination(Ipv4Address(address));
+    ip.SetProtocol(FlowActorCritic::PROTOCOL);ip.SetTtl(64);ip.SetPayloadSize(p->GetSize());p->AddHeader(ip);
+    AddHeader(p,0x800);FlowActorCritic::CountWire(p->GetSize());
+    for(const auto &nic:m_nic)if(nic.dev) {nic.dev->RdmaEnqueueHighPrioQ(p);nic.dev->TriggerTransmit();return;}
+    NS_FATAL_ERROR("FAC host has no NIC");
 }
 
 uint32_t RdmaHw::GetNicIdxOfQp(Ptr<RdmaQueuePair> qp) {
@@ -205,6 +218,7 @@ void RdmaHw::AddQueuePair(uint64_t size, uint16_t pg, Ipv4Address sip, Ipv4Addre
     m_nic[nic_idx].qpGrp->AddQp(qp);
     uint64_t key = GetQpKey(dip.Get(), sport, dport, pg);
     m_qpMap[key] = qp;
+    FlowActorCritic::HostStart(m_node->GetId(),flow_id,Simulator::Now().GetNanoSeconds());
 
     // set init variables
     DataRate m_bps = m_nic[nic_idx].dev->GetDataRate();
@@ -716,6 +730,7 @@ void RdmaHw::RecoverQueue(Ptr<RdmaQueuePair> qp) { qp->snd_nxt = qp->snd_una; }
 
 void RdmaHw::QpComplete(Ptr<RdmaQueuePair> qp) {
     NS_ASSERT(!m_qpCompleteCallback.IsNull());
+    FlowActorCritic::HostComplete(m_node->GetId(),qp->m_flow_id,Simulator::Now().GetNanoSeconds());
     if (m_cc_mode == 1) {
         Simulator::Cancel(qp->mlx.m_eventUpdateAlpha);
         Simulator::Cancel(qp->mlx.m_eventDecreaseRate);
